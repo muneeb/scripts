@@ -41,7 +41,7 @@ class Conf:
         self.infile = opts.infile
         self.exec_file = opts.exec_file
         self.re_memop = re.compile("(?:0[xX][0-9a-fA-F]+|0[bB][01]*|\d+|[a-zA-Z_.$][0-9a-zA-Z_.$]*)?\([^)]*\)")
-        self.re_offset = re.compile("[\s]+0[xX][0-9a-fA-F]+|[\s]+\d+")
+        self.re_offset = re.compile("[\s]+[+-]?0[xX][0-9a-fA-F]+|[\s]+[+-]?\d+")
         self.re_regs = re.compile("\([^)]*\)")
         self.ind_regs = re.compile("\%r[0-9a-zA-z]+")
 
@@ -68,7 +68,6 @@ def main():
 
         src_file_from_dbg = src_FILE_LINE.split(":")[0]
         src_line = int(src_FILE_LINE.split(":")[1])
-        print src_file_from_dbg, src_line
 
         pref_dec_dict[src_line] = [pref_type, pref_dist]
 
@@ -82,7 +81,10 @@ def main():
         
             [pref_type, sd] = pref_dec_dict[lineno]
         
-            off = long(offset[0]) + int(sd)
+            if offset:
+                off = long(offset[0]) + int(sd)
+            else:
+                off = int(sd)
             pref_reg_off = str(off)+regs[0]
             
             if pref_type == 'nta':
