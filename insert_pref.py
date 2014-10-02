@@ -77,6 +77,13 @@ def main():
         if lineno in pref_dec_dict:
             memop = conf.re_memop.findall(line)
             offset = conf.re_offset.findall(line)
+            
+            if not memop:
+                print line
+                print memop
+                outfile.write(line)
+                continue
+            
             regs = conf.re_regs.findall(memop[0])
         
             [pref_type, sd] = pref_dec_dict[lineno]
