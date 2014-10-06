@@ -68,25 +68,30 @@ def main():
 
         src_file_from_dbg = src_FILE_LINE.split(":")[0]
         src_line = int(src_FILE_LINE.split(":")[1])
+        insert_at_PC = insert_at_PC.lstrip("0x")
+        
+        src_line_raw = subprocess.Popen("llvm-objdump -d "+conf.exec_file+" | grep "+insert_at_PC+" | sed 's/[[:xdigit:]]\+:\s*\([[:xdigit:]]*\s\)*//g'", shell=True, stdout=subprocess.PIPE).communicate()[0]
 
-        pref_dec_dict[src_line] = [pref_type, pref_dist]
+        pref_dec_dict[src_line] = [pref_type, pref_dist, src_line_raw]
 
     lineno = 1
     for line in src_file:
         
         if lineno in pref_dec_dict:
-            memop = conf.re_memop.findall(line)
-            offset = conf.re_offset.findall(line)
+            
+            [pref_type, sd, src_line_raw] = pref_dec_dict[lineno]
+            
+            memop = conf.re_memop.findall(src_line_raw)
+            offset = conf.re_offset.findall(src_line_raw)
             
             if not memop:
+                print "as in binary: %s"%src_line_raw
                 print line
                 print memop
                 outfile.write(line)
                 continue
             
             regs = conf.re_regs.findall(memop[0])
-        
-            [pref_type, sd] = pref_dec_dict[lineno]
         
             if offset:
                 off = long(offset[0]) + int(sd)
