@@ -4,6 +4,7 @@ SPEC_HOME=/home/muneeb/spec2006_static
 SCRIPTS_HOME=/home/muneeb/git/scripts
 PAPI_TOOLS=/home/muneeb/papi_tools
 FGBPROF=/home/muneeb/protean/fgprof.out
+PINHOME=
 BKBPROF=bkprof.out
 
 # llvm and SBO path set up
@@ -20,36 +21,37 @@ export ONLINESCH_INCLUDE="-I${ONLINESCH_ROOT}/src -I${ONLINESCH_ROOT}/include"
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${ONLINESCH_ROOT}/lib:${ONLINESCH_ROOT}/src"
 
 # add SBO runtime library to path
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${SBO_PATH}/runtime"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${SBO_PATH}/runtime:/home/muneeb/perfmon2-libpfm4/lib/:/home/muneeb/pin-2.12-53271-gcc.4.4.7-ia32_intel64-linux/intel64/lib-ext"
 
 PAPI_CMD_STR=${PAPI_TOOLS}"/papi_profiler -n 4 -e L2_RQSTS:DEMAND_DATA_RD_MISS -e OFFCORE_RESPONSE_0:ANY_REQUEST:LLC_MISS_LOCAL -e UNHALTED_CORE_CYCLES -e BR_INST_EXEC:ALL_BRANCHES -o "
 
 
-export "SCHEDULER_PROFILE_FILE="${BKBPROF}
-export "PRT_ENABLED=1 "
+export SCHEDULER_PROFILE_FILE=${BKBPROF}
+export PRT_ENABLED=1
+export SBO_OPTIMIZER=2
 
 for HWPF_SETTINGS in off #on
 do
 
     ${SCRIPTS_HOME}/hwpf.sh ${HWPF_SETTINGS}
 
-    for FGBENCH in libquantum omnetpp #astar soplex
+    for FGBENCH in libquantum omnetpp astar soplex
     do
 
         FGPERF_OUT=/home/muneeb/protean/${FGBENCH}
 
         cd ${SPEC_HOME}/*${FGBENCH}*/src.clean
 
-        FGARGS=$(grep PARAMS Makefile | tr -d 'PARAMS=')
+        FGARGS=$(grep 'PARAMS=' Makefile | tr -d 'PARAMS=')
 
-        for BKBENCH in lbm mcf soplex
+        for BKBENCH in lbm mcf libquantum milc
         do
 
             cd ${SPEC_HOME}/*${BKBENCH}*/src.clean
 
-            BKARGS=$(grep PARAMS Makefile | tr -d 'PARAMS=')
+            BKARGS=$(grep 'PARAMS=' Makefile | tr -d 'PARAMS=')
 
-            for NTA_POLICY in -1 0 1 2
+            for NTA_POLICY in $(seq 0 11)
             do
 
                 cd ${SPEC_HOME}/*${FGBENCH}*/src.clean
@@ -61,12 +63,10 @@ do
 
                 cd ${SPEC_HOME}/*${BKBENCH}*/src.clean
 
-                if [ ${NTA_POLICY} != -1 ]
+                if [[ ${NTA_POLICY} > 0 ]]
                 then
-                    export SBO_OPTIMIZER=2
-                    taskset -c 2 ./${BKBENCH}_protean_ntap${NTA_POLICY}.frmasm ${BKARGS} > /dev/null &
+                    taskset -c 2 ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm ${BKARGS} > /dev/null &
                 else
-                    export SBO_OPTIMIZER=2
                     taskset -c 2 ./${BKBENCH}_protean.frmasm ${BKARGS} > /dev/null &
                 fi
 
@@ -94,3 +94,5 @@ do
     done
 
 done
+
+${SCRIPTS_HOME}/hwpf.sh on
