@@ -28,6 +28,11 @@ class Conf:
                           type="str", default=None,
                           dest="exec_file",
                           help="Executable file to inspect")
+                          
+        parser.add_option("-x",
+                          type="str", default=None,
+                          dest="opp_file",
+                          help="Extra file for opportunistic cache bypass")
 
         (opts, args) = parser.parse_args()
 
@@ -40,6 +45,7 @@ class Conf:
         self.outfile = opts.outfile
         self.infile = opts.infile
         self.exec_file = opts.exec_file
+        self.opp_file = opts.opp_file
         self.re_memop = re.compile("(?:0[xX][0-9a-fA-F]+|0[bB][01]*|\d+|[a-zA-Z_.$][0-9a-zA-Z_.$]*)?\([^)]*\)")
         self.re_offset = re.compile("[\s]+[+-]?0[xX][0-9a-fA-F]+|[\s]+[+-]?\d+")
         self.re_regs = re.compile("\([^)]*\)")
@@ -56,13 +62,16 @@ def main():
     pref_dec_dict = {}
 
     for line in infile:
-
+        
         fline = line.rstrip()
         fline_tok = fline.split(":")
 
-        insert_at_PC = fline_tok[0]
-        pref_type = fline_tok[1]
-        pref_dist = int(fline_tok[2])
+        insert_at_PC = fline_tok[3]
+        pref_type = fline_tok[4]
+        pref_dist = int(fline_tok[5])
+
+        if pref_type == 'ntaopp':
+            continue
 
         src_FILE_LINE = subprocess.Popen(["/home/muneeb/llvm-3.3/Release+Asserts/bin/llvm-dwarfdump", "-address="+insert_at_PC, conf.exec_file], stdout=subprocess.PIPE).communicate()[0]
 
@@ -73,6 +82,33 @@ def main():
         src_line_raw = subprocess.Popen("llvm-objdump -d "+conf.exec_file+" | grep "+insert_at_PC+" | sed 's/[[:xdigit:]]\+:\s*\([[:xdigit:]]*\s\)*//g'", shell=True, stdout=subprocess.PIPE).communicate()[0]
 
         pref_dec_dict[src_line] = [pref_type, pref_dist, src_line_raw]
+
+
+    if conf.opp_file:
+
+        infile = open(conf.opp_file, "r")
+
+        for line in infile:
+            
+            fline = line.rstrip()
+            fline_tok = fline.split(":")
+            
+            insert_at_PC = fline_tok[3]
+            pref_type = 'nta'
+            pref_dist = int(fline_tok[5])
+            
+            src_FILE_LINE = subprocess.Popen(["/home/muneeb/llvm-3.3/Release+Asserts/bin/llvm-dwarfdump", "-address="+insert_at_PC, conf.exec_file], stdout=subprocess.PIPE).communicate()[0]
+            
+            src_file_from_dbg = src_FILE_LINE.split(":")[0]
+            src_line = int(src_FILE_LINE.split(":")[1])
+            insert_at_PC = insert_at_PC.lstrip("0x")
+            
+            src_line_raw = subprocess.Popen("llvm-objdump -d "+conf.exec_file+" | grep "+insert_at_PC+" | sed 's/[[:xdigit:]]\+:\s*\([[:xdigit:]]*\s\)*//g'", shell=True, stdout=subprocess.PIPE).communicate()[0]
+
+            if src_line in pref_dec_dict:
+                pref_dec_dict[src_line][0] = 'nta'
+            else:
+                pref_dec_dict[src_line] = [pref_type, pref_dist, src_line_raw]
 
     lineno = 1
     for line in src_file:
@@ -89,6 +125,7 @@ def main():
                 print line
                 print memop
                 outfile.write(line)
+                lineno += 1
                 continue
             
             regs = conf.re_regs.findall(memop[0])

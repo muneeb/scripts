@@ -33,16 +33,18 @@ END_LEGAL */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sstream>
 #include "pin.H"
 
 KNOB<string> KnobInputFile(KNOB_MODE_WRITEONCE, "pintool",
     "i", "<imagename>", "specify an image to read");
 
-KNOB<unsigned long> knob_dec_address(KNOB_MODE_WRITEONCE, "pintool", "a", "0",
-				    "address of an instruction in a routine");
+KNOB<unsigned long> knob_dec_address(KNOB_MODE_WRITEONCE, "pintool",
+                           "a", "0", "address of an instruction in a routine in decimal");
 
-KNOB<unsigned> knob_disassm_full(KNOB_MODE_WRITEONCE, "pintool", "l", "0",
-			 "Disassemble entire binary image");
+KNOB<string> knob_hex_address(KNOB_MODE_WRITEONCE, "pintool", "x", "0xdeadbeef",
+				    "address of an instruction in a routine in hex");
+
 
 /* ===================================================================== */
 /* Print Help Message                                                    */
@@ -99,6 +101,16 @@ int main(INT32 argc, CHAR **argv)
         exit(1);
     }
     
+    uint64_t ins_addr;
+    std::stringstream ss;
+    
+    if (knob_dec_address !=0 )
+        ins_addr = knob_dec_address;
+    else{
+        ss << std::hex << std::string(knob_hex_address);
+        ss >> ins_addr;
+    }
+    
     std::cout << hex;
     
     for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
@@ -129,7 +141,7 @@ int main(INT32 argc, CHAR **argv)
         uint32_t FuncReadOps = 0;
         uint32_t FuncWriteOps = 0;
             
-	    if( knob_disassm_full || (routineStartAddress <= knob_dec_address && routineEndAddress >= knob_dec_address) ){
+	    if(routineStartAddress <= ins_addr && routineEndAddress >= ins_addr){
 
 	      for (INS ins = RTN_InsHead(rtn); INS_Valid(ins); ins = INS_Next(ins)){
 		  
@@ -143,6 +155,9 @@ int main(INT32 argc, CHAR **argv)
               continue;
               }
               
+          else if( INS_IsStackRead(ins) || INS_IsStackWrite(ins))
+              continue;
+              
 		  else if( INS_IsMemoryRead(ins) || INS_IsMemoryWrite(ins)){
               
               FuncMemOps++;
@@ -152,7 +167,7 @@ int main(INT32 argc, CHAR **argv)
               if( INS_IsMemoryRead(ins) ){
                   FuncReadOps++;
                   
-                  if (knob_dec_address == INS_Address(ins))
+                  if (ins_addr == INS_Address(ins))
                     std::cout << RTN_Name(rtn) << ":" << std::dec << FuncMemOps << ":r" << std::dec << FuncReadOps << std::endl;
                   
                   
@@ -160,22 +175,10 @@ int main(INT32 argc, CHAR **argv)
               else{
                   FuncWriteOps++;
                   
-                  if (knob_dec_address == INS_Address(ins))
+                  if (ins_addr == INS_Address(ins))
                     std::cout << RTN_Name(rtn) << ":" << std::dec << FuncMemOps << ":w" << std::dec << FuncReadOps << std::endl;
               }
-              
-//              if (knob_dec_address == INS_Address(ins)){
-//                  //std::cout << "instr:    " << setw(8) << INS_Address(ins) << " " << INS_Disassemble(ins) << endl;
-//                  for(int i = 0; i< num_rregs; i++)
-//                  std::cout << "R:" << INS_RegR(ins, i) << "   ";
-//                  
-//                  int num_wregs = INS_MaxNumWRegs(ins);
-//                  
-//                  for(int i = 0; i< num_wregs; i++)
-//                  std::cout << "W:" << INS_RegW(ins, i) << "   ";
-//                  std::cout << endl;
-//              }
-          }
+            }
 
 	      }
 	    }
