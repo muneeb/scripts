@@ -51,9 +51,12 @@ do
 
             BKARGS=$(grep 'PARAMS=' Makefile | tr -d 'PARAMS=')
 
+            PREV_NTA_COUNT=-1
+            NTA_COUNT=0
+
             for NTA_POLICY in $(seq 0 11)
             do
-
+		
                 cd ${SPEC_HOME}/*${FGBENCH}*/src.clean
 
                 #${PAPI_CMD_STR}${FGBPROF} -t
@@ -65,6 +68,13 @@ do
 
                 if [[ ${NTA_POLICY} > 0 ]]
                 then
+                    NTA_COUNT=$(objdump -d ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm | grep 'prefetchnta' | wc -l)
+
+                    if [[ ${PREV_NTA_COUNT} == ${NTA_COUNT} ]]
+                    then
+                        continue
+                    fi
+
                     taskset -c 2 ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm ${BKARGS} > /dev/null &
                 else
                     taskset -c 2 ./${BKBENCH}_protean.frmasm ${BKARGS} > /dev/null &
@@ -78,6 +88,8 @@ do
 
                 grep 'CPU=2' ${BKBPROF} | tr -s "[:alpha:][_][:alpha:]=" '====' | tr -d "====" > ${FGPERF_OUT}_BG_${BKBENCH}ntap${NTA_POLICY}.csv
 
+                PREV_NTA_COUNT=${NTA_COUNT}
+
 #                LLC_MISSES=$(grep 'OFFCORE_RESPONSE_0:ANY_REQUEST:LLC_MISS_LOCAL' ${FGBPROF} | awk '{print $2}')
 #                CYCLES=$(grep 'UNHALTED_CORE_CYCLES' ${FGBPROF} | awk '{print $2}')
 #                INSTRS=$(grep 'INSTRUCTIONS_RETIRED' ${FGBPROF} | awk '{print $2}')
@@ -87,7 +99,6 @@ do
 
 #                echo ${BKBENCH}"_ntap"${NTA_POLICY}" "${IPC}" "${BW}" "${CYCLES}" "${LLC_MISSES} >>
             done
-
 
         done
 
