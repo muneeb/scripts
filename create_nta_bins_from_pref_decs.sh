@@ -3,7 +3,7 @@
 SCRIPTS_HOME=/home/muneeb/git/scripts
 SPEC_HOME=/home/muneeb/spec2006_static
 
-for BENCH in mcf libquantum lbm #milc #soplex
+for BENCH in mcf libquantum lbm milc #soplex
 do
 
     BENCH_DIR=${SPEC_HOME}/*${BENCH}*/src.clean
@@ -52,9 +52,10 @@ do
 
         /home/muneeb/llvm-3.3/Release+Asserts/bin/clang -O3 -sbo ${ASM_OUTFILE} -o ${OPT_EXE_BASE_NAME}.sbo.nobc -L/home/muneeb/llvm-3.3/lib/Transforms/SBO/runtime -lSBO_runtime -ldl -lrt ${BENCH_LD_FLAGS} -Wl,--export-dynamic
 
-        objcopy --add-section .sbo_ir=${BENCH}_protean.sbo.ll ${OPT_EXE_BASE_NAME}.sbo.nobc ${OPT_EXE_BASE_NAME}.frmasm
+        #avoid inserting inline assembler in the IR mean to be used by JIT
+        grep -v 'call void asm' ${BENCH}_protean.sbo.ll > ${BENCH}_protean.sbo2.ll
 
-
+        objcopy --add-section .sbo_ir=${BENCH}_protean.sbo2.ll ${OPT_EXE_BASE_NAME}.sbo.nobc ${OPT_EXE_BASE_NAME}.frmasm
 
         NTA_COUNT=$(/home/muneeb/llvm-3.3/Release+Asserts/bin/llvm-objdump -d ${OPT_EXE_BASE_NAME}.frmasm | grep 'prefetchnta' | wc -l)
 
