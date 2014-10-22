@@ -75,9 +75,20 @@ do
                         continue
                     fi
 
-                    taskset -c 2 ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm ${BKARGS} > /dev/null &
+                    if [[ ${BKBENCH} == milc ]]
+                    then
+                        taskset -c 2 ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm < "su3imp.in" > /dev/null &
+                    else
+                        taskset -c 2 ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm ${BKARGS} > /dev/null &
+                    fi
+
                 else
-                    taskset -c 2 ./${BKBENCH}_protean.frmasm ${BKARGS} > /dev/null &
+                    if [[ ${BKBENCH} == milc ]]
+                    then
+                        taskset -c 2 ./${BKBENCH}_protean.frmasm < "su3imp.in"  > /dev/null &
+                    else
+                        taskset -c 2 ./${BKBENCH}_protean.frmasm < "su3imp.in"  > /dev/null &
+                    fi
                 fi
 
                 wait ${FG_PID}
