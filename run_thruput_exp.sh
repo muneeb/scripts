@@ -87,7 +87,7 @@ do
                     then
                         taskset -c 2 ./${BKBENCH}_protean.frmasm < "su3imp.in"  > /dev/null &
                     else
-                        taskset -c 2 ./${BKBENCH}_protean.frmasm < "su3imp.in"  > /dev/null &
+                        taskset -c 2 ./${BKBENCH}_protean.frmasm < ${BKARGS} > /dev/null &
                     fi
                 fi
 
