@@ -110,9 +110,9 @@ do
 
                 if [[ ${BKBENCH} == milc ]]
                 then
-                    taskset -c 2 ${PERF_CMD_STR}${BKBPROF} ${APP_TRACE_TOK} ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm < "su3imp.in" > /dev/null &
+                    taskset -c 2 ${PERF_CMD_STR}${BKBPROF} ${APP_TRACE_TOK} ./${BKBENCH}_protean.frmasm < "su3imp.in" > /dev/null &
                 else
-                    taskset -c 2 ${PERF_CMD_STR}${BKBPROF} ${APP_TRACE_TOK} ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm ${BKARGS} > /dev/null &
+                    taskset -c 2 ${PERF_CMD_STR}${BKBPROF} ${APP_TRACE_TOK} ./${BKBENCH}_protean.frmasm ${BKARGS} > /dev/null &
                 fi
 
                 wait
