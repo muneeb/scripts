@@ -115,6 +115,7 @@ do
                     taskset -c 2 ${PERF_CMD_STR}${BKBPROF} ${APP_TRACE_TOK} ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm ${BKARGS} > /dev/null &
                 fi
 
+                wait
 
                 if [[ ${USING_PAPI} == 1 ]]
                 then
