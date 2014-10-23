@@ -39,6 +39,7 @@ CPU=amd_ph2
 if [[ ${VENDOR} == AuthenticAMD ]]
 then
     echo "AMD detected. Using Perf tool"
+    APP_TRACE_TOK=
     /home/muneeb/sdist_pref/hwpf.sh on
 else
     echo "Intel detected. Using Papi tool"
@@ -46,6 +47,7 @@ else
     USING_PAPI=1
     CPU=intel_snb
     ${SCRIPTS_HOME}/hwpf.sh on
+    APP_TRACE_TOK="-t"
 fi
 
 
@@ -64,7 +66,7 @@ do
 
         FGARGS=$(grep 'PARAMS=' Makefile | tr -d 'PARAMS=')
 
-        ${PERF_CMD_STR}${FGBPROF} -t ./${FGBENCH}_112012.orig ${FGARGS} > /dev/null &
+        ${PERF_CMD_STR}${FGBPROF} ${APP_TRACE_TOK} ./${FGBENCH}_112012.orig ${FGARGS} > /dev/null &
 
         wait
 
@@ -108,9 +110,9 @@ do
 
                 if [[ ${BKBENCH} == milc ]]
                 then
-                    taskset -c 2 ${PERF_CMD_STR}${BKBPROF} -t ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm < "su3imp.in" > /dev/null &
+                    taskset -c 2 ${PERF_CMD_STR}${BKBPROF} ${APP_TRACE_TOK} ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm < "su3imp.in" > /dev/null &
                 else
-                    taskset -c 2 ${PERF_CMD_STR}${BKBPROF} -t ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm ${BKARGS} > /dev/null &
+                    taskset -c 2 ${PERF_CMD_STR}${BKBPROF} ${APP_TRACE_TOK} ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm ${BKARGS} > /dev/null &
                 fi
 
 
@@ -144,7 +146,7 @@ do
 
                 cd ${SPEC_HOME}/*${FGBENCH}*/src.clean
 
-                taskset -c 0 ${PERF_CMD_STR}${FGBPROF} -t ./${FGBENCH}_112012.orig ${FGARGS} > /dev/null &
+                taskset -c 0 ${PERF_CMD_STR}${FGBPROF} ${APP_TRACE_TOK} ./${FGBENCH}_112012.orig ${FGARGS} > /dev/null &
 
                 cd ${SPEC_HOME}/*${BKBENCH}*/src.clean
 
@@ -159,17 +161,17 @@ do
 
                     if [[ ${BKBENCH} == milc ]]
                     then
-                        taskset -c 2 ${PERF_CMD_STR}${BKBPROF} -t ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm < "su3imp.in" > /dev/null &
+                        taskset -c 2 ${PERF_CMD_STR}${BKBPROF} ${APP_TRACE_TOK} ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm < "su3imp.in" > /dev/null &
                     else
-                        taskset -c 2 ${PERF_CMD_STR}${BKBPROF} -t ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm ${BKARGS} > /dev/null &
+                        taskset -c 2 ${PERF_CMD_STR}${BKBPROF} ${APP_TRACE_TOK} ./${BKBENCH}_protean_prefp${NTA_POLICY}.frmasm ${BKARGS} > /dev/null &
                     fi
 
                 else
                     if [[ ${BKBENCH} == milc ]]
                     then
-                        taskset -c 2 ${PERF_CMD_STR}${BKBPROF} -t ./${BKBENCH}_protean.frmasm < "su3imp.in"  > /dev/null &
+                        taskset -c 2 ${PERF_CMD_STR}${BKBPROF} ${APP_TRACE_TOK} ./${BKBENCH}_protean.frmasm < "su3imp.in"  > /dev/null &
                     else
-                        taskset -c 2 ${PERF_CMD_STR}${BKBPROF} -t ./${BKBENCH}_protean.frmasm ${BKARGS} > /dev/null &
+                        taskset -c 2 ${PERF_CMD_STR}${BKBPROF} ${APP_TRACE_TOK} ./${BKBENCH}_protean.frmasm ${BKARGS} > /dev/null &
                     fi
                 fi
 
