@@ -59,7 +59,7 @@ do
     for FGBENCH in libquantum omnetpp astar soplex
     do
 
-        FGPERF_THRUPUT_OUT=/home/muneeb/protean/${FGBENCH}_thrupt_${CPU}.out
+        FGPERF_THRUPUT_OUT=/home/muneeb/protean/${FGBENCH}_thruput_${CPU}.out
         FGPERF_ISO_OUT=/home/muneeb/protean/${FGBENCH}_isolated_${CPU}.out
 
         cd ${SPEC_HOME}/*${FGBENCH}*/src.clean
