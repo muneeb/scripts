@@ -38,11 +38,11 @@ CPU=amd_ph2
 
 if [[ ${VENDOR} == AuthenticAMD ]]
 then
-    echo "AMD detected. Using Perf tool"
+    echo "AMD detected. Using Perf tool..."
     APP_TRACE_TOK=
     /home/muneeb/sdist_pref/hwpf.sh on
 else
-    echo "Intel detected. Using Papi tool"
+    echo "Intel detected. Using Papi tool..."
     PERF_CMD_STR=${PAPI_CMD_STR}
     USING_PAPI=1
     CPU=intel_snb
@@ -66,7 +66,7 @@ do
 
         FGARGS=$(grep 'PARAMS=' Makefile | tr -d 'PARAMS=')
 
-        ${PERF_CMD_STR}${FGBPROF} ${APP_TRACE_TOK} ./${FGBENCH}_112012.orig ${FGARGS} > /dev/null &
+        taskset -c 0 ${PERF_CMD_STR}${FGBPROF} ${APP_TRACE_TOK} ./${FGBENCH}_112012.orig ${FGARGS} > /dev/null &
 
         wait
 
@@ -103,7 +103,7 @@ do
             PREV_NTA_COUNT=-1
             NTA_COUNT=0
 
-            BKPERF_ISO_OUT=/home/muneeb/protean/${BKBENCH}_isolated.out
+            BKPERF_ISO_OUT=/home/muneeb/protean/${BKBENCH}_isolated_${CPU}.out
 
             if [ ! -f ${BKPERF_ISO_OUT} ]
             then
