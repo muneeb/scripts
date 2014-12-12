@@ -17,25 +17,15 @@ ENUMS = enum(PRT_COMM_SEND=1, PRT_COMM_RECV=2, \
                SWPF_2MBLLC=4, SWPF_1MBLLC=5, SWPF_0MBLLC=6, SWPF_JIT_ACTIVE=7,\
                NO_REVERT_TO_PREV=0, REVERT_TO_PREV=1, REVERT_TO_ORIG=2)
 
-BUF_SIZE=52
-NUM_APPS=4
-SLEEP_TIME=0.1  #100 milli-sec
-NUM_MON_WIN=5
-REEXP_TIME=1000
-STRUCT_FMTSTR="iiiiifffffiii"
-ENABLED_SWPF = False
-
-PERF_BOOK = {"hwpf":1}
-AVG_PERF_BOOK = {}
-MON_WIN_BOOK = {}
-curr_policy="hwpf"
-max_perf_policy="hwpf"
-max_thruput=1
-
 EXP_PLAN = {4:["hwpf", "swpf", "l1hwpfswpf", "hwpfswpf", "nopref"], \
             3:["hwpf", "l1hwpfswpf", "swpf", "hwpfswpf", "nopref"], \
             2:["hwpf", "hwpfswpf", "swpf", "l1hwpfswpf"],\
             1:["hwpf", "hwpfswpf", "l1hwpfswpf"]}
+
+PERF_BOOK = {"hwpf":1}
+
+AVG_PERF_BOOK = {}
+MON_WIN_BOOK = {}
 
 class Conf:
     def __init__(self):
@@ -62,20 +52,26 @@ class Conf:
                           type="int", default="5",
                           dest="NUM_MON_WIN",
                           help="Number of performance windows to monitor for each policy")
+        parser.add_option("-x", "--exit-after",
+                        type="int", default="60",
+                        dest="EXIT_AFTER",
+                        help="Exit after XXX seconds of applying the optimal policy")
 
         (opts, args) = parser.parse_args()
+        
+        
+        self.STRUCT_FMTSTR="iiiiifffffiii"
+        self.ENABLED_SWPF = False
+        self.curr_policy="hwpf"
+        self.max_perf_policy="hwpf"
+        self.max_thruput=1
 
-        global BUF_SIZE
-        global NUM_APPS
-        global SLEEP_TIME
-        global REEXP_TIME
-        global NUM_MON_WIN
-
-        BUF_SIZE = opts.BUF_SIZE
-        NUM_APPS = opts.NUM_APPS
-        SLEEP_TIME = opts.SLEEP_TIME
-        REEXP_TIME = opts.REEXP_TIME
-        NUM_MON_WIN = opts.NUM_MON_WIN
+        self.BUF_SIZE = opts.BUF_SIZE
+        self.NUM_APPS = opts.NUM_APPS
+        self.SLEEP_TIME = opts.SLEEP_TIME
+        self.REEXP_TIME = opts.REEXP_TIME
+        self.NUM_MON_WIN = opts.NUM_MON_WIN
+        self.EXIT_AFTER= opts.EXIT_AFTER
 
         self.rp = os.open("/tmp/PRT_POL_MAN_RECV", os.O_RDONLY )
         fl = fcntl.fcntl(self.rp, fcntl.F_GETFL)
@@ -84,7 +80,7 @@ class Conf:
         self.rp_app = []
         self.wp = []
     
-        for core_idx in range(NUM_APPS):
+        for core_idx in range(self.NUM_APPS):
         
             self.rp_app.append(os.open("/tmp/PRT_SND_INFO_%d"%(core_idx), os.O_RDONLY ))
             self.wp.append(os.open("/tmp/PRT_RECV_INFO_%d"%(core_idx), os.O_WRONLY ))
@@ -95,17 +91,16 @@ class Conf:
             fl = fcntl.fcntl(self.wp[core_idx], fcntl.F_GETFL)
             fcntl.fcntl(self.wp[core_idx], fcntl.F_SETFL, fl | os.O_NONBLOCK)
 
-
-def nonblocking_readlines(fd):
+def nonblocking_readlines(fd, conf):
 
     os.lseek(fd, 0, os.SEEK_SET)
 
     buf = bytearray()
-    remaining_bytes = BUF_SIZE
+    remaining_bytes = conf.BUF_SIZE
     
     while remaining_bytes > 0:
         try:
-            block = os.read(fd, BUF_SIZE) #read BUF_SIZE-byte chunks at a time
+            block = os.read(fd, conf.BUF_SIZE) #read BUF_SIZE-byte chunks at a time
         except BlockingIOError:
             print "No communication!"
         
@@ -133,15 +128,15 @@ def deleteContent(fd):
     os.ftruncate(fd, 0)
     os.lseek(fd, 0, os.SEEK_SET)
 
-def compute_weighted_speedup(bpc_list):
+def compute_weighted_speedup(bpc_list, conf):
 
     hwpf_bpc_list = AVG_PERF_BOOK["hwpf"]
     ws = 0
 
-    for idx in range(NUM_APPS):
+    for idx in range(conf.NUM_APPS):
         ws += float(bpc_list[idx]/hwpf_bpc_list[idx])
 
-    return float(ws)/float(NUM_APPS)
+    return float(ws)/float(conf.NUM_APPS)
 
 def monitor_perf(policy, conf):
 
@@ -152,91 +147,93 @@ def monitor_perf(policy, conf):
     core_id = [0,1,2,3]
     bpc = [0,0,0,0]
 
-    while i < NUM_MON_WIN:
+    while i < conf.NUM_MON_WIN:
 
-        data = nonblocking_readlines(conf.rp)
+        data = nonblocking_readlines(conf.rp, conf)
         
         if not data:
             continue
         
-        (comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert) = struct.unpack(STRUCT_FMTSTR, data)
+        (comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert) = struct.unpack(conf.STRUCT_FMTSTR, data)
 
         bpc[0] += bpc0
         bpc[1] += bpc1
         bpc[2] += bpc2
         bpc[3] += bpc3
-
+        
         i += 1
-        time.sleep(SLEEP_TIME)
+        time.sleep(conf.SLEEP_TIME)
 
     #average recorded bpc
-    for idx in range(NUM_APPS):
-        bpc[idx] = float(bpc[idx])/float(NUM_MON_WIN)
+    for idx in range(conf.NUM_APPS):
+        bpc[idx] = float(bpc[idx])/float(conf.NUM_MON_WIN)
 
     AVG_PERF_BOOK[policy] = bpc
 
     if policy != "hwpf":
-        ws = compute_weighted_speedup(bpc)
+        ws = compute_weighted_speedup(bpc, conf)
         PERF_BOOK[policy] = ws
 
-        if ws > max_thruput:
-            max_thruput = ws
-            max_perf_policy = policy
+        if ws > conf.max_thruput:
+            conf.max_thruput = ws
+            conf.max_perf_policy = policy
 
 def wait_for_JIT(conf):
 
+    print "POLMAN -- Waiting for %d JIT instances to complete"%(len(conf.rp_app))
+
     for fd in conf.rp_app:
         while True:
-            data = nonblocking_readlines(fd)
+            data = nonblocking_readlines(fd, conf)
             if not data:
-                time.sleep(1)
+                time.sleep(0.25)
                 continue
-            (comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert) = struct.unpack(STRUCT_FMTSTR, data)
+            (comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert) = struct.unpack(conf.STRUCT_FMTSTR, data)
+
+            print "POLMAN in JIT -- SWPF STATUS %d"%(swpf_status)
+            print comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert
 
             if swpf_status == ENUMS.SWPF_JIT_ACTIVE:
                 break
-            time.sleep(1)
+            time.sleep(0.25)
 
 def ready_this_policy(policy, conf):
 
     print "POLMAN -- readying policy %s"%(policy)
-
-    global ENABLED_SWPF
+    
+    conf.ENABLED_SWPF = False
 
     if policy == "hwpf":
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                                             0.0, 0.0, 0.0, 0.0, 0.0, \
                                             ENUMS.HWPF_ON, 0, ENUMS.REVERT_TO_ORIG)
-        ENABLED_SWPF = False
     elif policy == "swpf":
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                              0.0, 0.0, 0.0, 0.0, 0.0, \
                              ENUMS.HWPF_OFF, ENUMS.SWPF_8MBLLC, ENUMS.NO_REVERT_TO_PREV)
-        if not ENABLED_SWPF:
-            ENABLED_SWPF = True
     elif policy == "l1hwpfswpf":
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                                0.0, 0.0, 0.0, 0.0, 0.0, \
                                ENUMS.LLC_HWPF_OFF, ENUMS.SWPF_8MBLLC, ENUMS.NO_REVERT_TO_PREV)
-        if not ENABLED_SWPF:
-            ENABLED_SWPF = True
     elif policy == "hwpfswpf":
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                                0.0, 0.0, 0.0, 0.0, 0.0, \
                                ENUMS.HWPF_ON, ENUMS.SWPF_8MBLLC, ENUMS.NO_REVERT_TO_PREV)
-        if not ENABLED_SWPF:
-            ENABLED_SWPF = True
     elif policy == "nopref":
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                                0.0, 0.0, 0.0, 0.0, 0.0, \
                                ENUMS.HWPF_OFF, 0, ENUMS.REVERT_TO_ORIG)
-        ENABLED_SWPF = False
     
     for fd in conf.wp:
         send_data(fd, snd_data)
 
-    if ENABLED_SWPF:
+    if (conf.curr_policy == "hwpf" or conf.curr_policy == "orig") and policy != conf.curr_policy:
+        conf.ENABLED_SWPF = True
+
+    if conf.ENABLED_SWPF:
         wait_for_JIT(conf)
+
+    conf.curr_policy = policy
 
     print "POLMAN -- policy %s is ready on all cores"%(policy)
 
@@ -249,28 +246,34 @@ def main():
 
     exp_plan_idx = 0
 
-    total_states = len(EXP_PLAN[NUM_APPS][exp_plan_idx])
+    total_states = len(EXP_PLAN[conf.NUM_APPS])
 
     while True:
     
         print "POLMAN -- entering exploration phase"
     
-        time.sleep(SLEEP_TIME) # sleep for 100 milli-seconds -- 2X the protean runtime
+        time.sleep(conf.SLEEP_TIME) # sleep for 100 milli-seconds -- 2X the protean runtime
         
         for exp_plan_idx in range(total_states):
         
-            policy = EXP_PLAN[NUM_APPS][exp_plan_idx]
+            policy = EXP_PLAN[conf.NUM_APPS][exp_plan_idx]
         
             ready_this_policy(policy, conf)
 
-            monitor_perf(EXP_PLAN[NUM_APPS][exp_plan_idx], conf)
+            monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], conf)
 
         #apply policy with max performance
-        print "POLMAN -- Applying best prefetching policy: %s"%(max_perf_policy)
-        ready_this_policy(max_perf_policy, conf)
+        print "POLMAN -- Applying best prefetching policy: %s"%(conf.max_perf_policy)
+        ready_this_policy(conf.max_perf_policy, conf)
 
-        #sleep until next exploration phase
-        time.sleep(REEXP_TIME)
+
+        if conf.EXIT_AFTER >= conf.REEXP_TIME:
+            #sleep until next exploration phase
+            time.sleep(conf.REEXP_TIME)
+            conf.EXIT_AFTER -= conf.REEXP_TIME
+        else:
+            time.sleep(conf.EXIT_AFTER)
+            break
 
 
 if __name__ == '__main__':
