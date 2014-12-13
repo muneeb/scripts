@@ -41,7 +41,7 @@ class Conf:
                         dest="NUM_APPS",
                         help="Number of active cores. Total applications running")
         parser.add_option("-s", "--sleep",
-                          type="float", default="0.1",
+                          type="float", default="0.05",
                           dest="SLEEP_TIME",
                           help="Sleep time in milli-seconds")
         parser.add_option("-r", "--reexplore-in",
@@ -49,7 +49,7 @@ class Conf:
                         dest="REEXP_TIME",
                         help="Start re-exploration of best prefetch policy in XXX seconds")
         parser.add_option("-w", "--num-mon-win",
-                          type="int", default="5",
+                          type="int", default="10",
                           dest="NUM_MON_WIN",
                           help="Number of performance windows to monitor for each policy")
         parser.add_option("-x", "--exit-after",
@@ -64,7 +64,7 @@ class Conf:
         self.ENABLED_SWPF = False
         self.curr_policy="hwpf"
         self.max_perf_policy="hwpf"
-        self.max_thruput=1
+        self.max_thruput=1.0
 
         self.BUF_SIZE = opts.BUF_SIZE
         self.NUM_APPS = opts.NUM_APPS
@@ -116,7 +116,7 @@ def nonblocking_readlines(fd, conf):
         buf.extend(block)
 
         if remaining_bytes > 0:
-            time.sleep(0.05)
+            time.sleep(conf.SLEEP_TIME)
         
     return buf
 
@@ -131,10 +131,10 @@ def deleteContent(fd):
 def compute_weighted_speedup(bpc_list, conf):
 
     hwpf_bpc_list = AVG_PERF_BOOK["hwpf"]
-    ws = 0
+    ws = 0.0
 
     for idx in range(conf.NUM_APPS):
-        ws += float(bpc_list[idx]/hwpf_bpc_list[idx])
+        ws += float(bpc_list[idx])/float(hwpf_bpc_list[idx])
 
     return float(ws)/float(conf.NUM_APPS)
 
@@ -164,6 +164,10 @@ def monitor_perf(policy, conf):
         i += 1
         time.sleep(conf.SLEEP_TIME)
 
+    #revert immediately do default once performance has been recorded
+    #if policy != "hwpf":
+    #    ready_this_policy("hwpf", conf)
+
     #average recorded bpc
     for idx in range(conf.NUM_APPS):
         bpc[idx] = float(bpc[idx])/float(conf.NUM_MON_WIN)
@@ -178,6 +182,8 @@ def monitor_perf(policy, conf):
             conf.max_thruput = ws
             conf.max_perf_policy = policy
 
+        print "policy %s -- weighted speedup %f"%(policy, ws)
+
 def wait_for_JIT(conf):
 
     print "POLMAN -- Waiting for %d JIT instances to complete"%(len(conf.rp_app))
@@ -186,16 +192,13 @@ def wait_for_JIT(conf):
         while True:
             data = nonblocking_readlines(fd, conf)
             if not data:
-                time.sleep(0.25)
+                time.sleep(conf.SLEEP_TIME)
                 continue
             (comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert) = struct.unpack(conf.STRUCT_FMTSTR, data)
 
-            print "POLMAN in JIT -- SWPF STATUS %d"%(swpf_status)
-            print comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert
-
             if swpf_status == ENUMS.SWPF_JIT_ACTIVE:
                 break
-            time.sleep(0.25)
+            time.sleep(conf.SLEEP_TIME)
 
 def ready_this_policy(policy, conf):
 
@@ -204,9 +207,14 @@ def ready_this_policy(policy, conf):
     conf.ENABLED_SWPF = False
 
     if policy == "hwpf":
+        
+        revert = ENUMS.REVERT_TO_ORIG
+        if conf.curr_policy == "hwpf" or conf.curr_policy == "orig":
+            revert = ENUMS.NO_REVERT_TO_PREV
+        
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                                             0.0, 0.0, 0.0, 0.0, 0.0, \
-                                            ENUMS.HWPF_ON, 0, ENUMS.REVERT_TO_ORIG)
+                                            ENUMS.HWPF_ON, 0, revert)
     elif policy == "swpf":
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                              0.0, 0.0, 0.0, 0.0, 0.0, \
@@ -240,7 +248,7 @@ def ready_this_policy(policy, conf):
 def main():
 
     #ignore the first 5 seconds
-    time.sleep(0.5)
+    time.sleep(5)
 
     conf = Conf()
 
