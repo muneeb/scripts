@@ -6,6 +6,9 @@ import locale
 import fcntl
 import time
 
+import subprocess
+import sys
+
 from optparse import OptionParser
 
 def enum(**enums):
@@ -63,8 +66,10 @@ class Conf:
         self.STRUCT_FMTSTR="iiiiifffffiii"
         self.ENABLED_SWPF = False
         self.curr_policy="hwpf"
+        self.baseline = "hwpf"
         self.max_perf_policy="hwpf"
         self.max_thruput=1.0
+        self.start_time = time.time()
 
         self.BUF_SIZE = opts.BUF_SIZE
         self.NUM_APPS = opts.NUM_APPS
@@ -106,13 +111,13 @@ def nonblocking_readlines(fd, conf):
         
         remaining_bytes -= len(block)
         
-        print "data is %d Bytes"%(len(block))
+        #print "data is %d Bytes"%(len(block))
         
         if not block:
             if buf:
                 buf.clear()
             return buf
-    
+        
         buf.extend(block)
 
         if remaining_bytes > 0:
@@ -138,7 +143,7 @@ def compute_weighted_speedup(bpc_list, conf):
 
     return float(ws)/float(conf.NUM_APPS)
 
-def monitor_perf(policy, conf):
+def monitor_perf(policy, mon_time, conf):
 
     print "POLMAN -- monitoring performance for policy %s"%(policy)
 
@@ -146,8 +151,10 @@ def monitor_perf(policy, conf):
 
     core_id = [0,1,2,3]
     bpc = [0,0,0,0]
+    
+    num_mon_wins = mon_time / conf.SLEEP_TIME
 
-    while i < conf.NUM_MON_WIN:
+    while i < num_mon_wins: #conf.NUM_MON_WIN:
 
         data = nonblocking_readlines(conf.rp, conf)
         
@@ -170,7 +177,7 @@ def monitor_perf(policy, conf):
 
     #average recorded bpc
     for idx in range(conf.NUM_APPS):
-        bpc[idx] = float(bpc[idx])/float(conf.NUM_MON_WIN)
+        bpc[idx] = float(bpc[idx])/float(num_mon_wins)#conf.NUM_MON_WIN)
 
     AVG_PERF_BOOK[policy] = bpc
 
@@ -195,16 +202,36 @@ def wait_for_JIT(conf):
                 time.sleep(conf.SLEEP_TIME)
                 continue
             (comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert) = struct.unpack(conf.STRUCT_FMTSTR, data)
-
+            
             if swpf_status == ENUMS.SWPF_JIT_ACTIVE:
                 break
             time.sleep(conf.SLEEP_TIME)
 
+def wait_for_hwpf_throttle(hwpf_change_to, conf):
+
+    print "POLMAN -- waiting for HWPF to change to %d"%(hwpf_change_to)
+
+    fd = conf.rp
+
+    while True:
+        data = nonblocking_readlines(fd, conf)
+        if not data:
+            time.sleep(conf.SLEEP_TIME)
+            continue
+        (comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert) = struct.unpack(conf.STRUCT_FMTSTR, data)
+        
+        if hwpf_status == hwpf_change_to:
+            break
+        time.sleep(conf.SLEEP_TIME)
+
 def ready_this_policy(policy, conf):
 
+    print "\n----------------------------"
     print "POLMAN -- readying policy %s"%(policy)
     
     conf.ENABLED_SWPF = False
+
+    hwpf_change_to = ENUMS.HWPF_ON
 
     if policy == "hwpf":
         
@@ -219,18 +246,29 @@ def ready_this_policy(policy, conf):
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                              0.0, 0.0, 0.0, 0.0, 0.0, \
                              ENUMS.HWPF_OFF, ENUMS.SWPF_8MBLLC, ENUMS.NO_REVERT_TO_PREV)
+            
+        hwpf_change_to = ENUMS.HWPF_OFF
+
     elif policy == "l1hwpfswpf":
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                                0.0, 0.0, 0.0, 0.0, 0.0, \
                                ENUMS.LLC_HWPF_OFF, ENUMS.SWPF_8MBLLC, ENUMS.NO_REVERT_TO_PREV)
+
+        hwpf_change_to = ENUMS.LLC_HWPF_OFF
+
     elif policy == "hwpfswpf":
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                                0.0, 0.0, 0.0, 0.0, 0.0, \
                                ENUMS.HWPF_ON, ENUMS.SWPF_8MBLLC, ENUMS.NO_REVERT_TO_PREV)
+
+        hwpf_change_to = ENUMS.HWPF_ON
+
     elif policy == "nopref":
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                                0.0, 0.0, 0.0, 0.0, 0.0, \
                                ENUMS.HWPF_OFF, 0, ENUMS.REVERT_TO_ORIG)
+
+        hwpf_change_to = ENUMS.HWPF_OFF
     
     for fd in conf.wp:
         send_data(fd, snd_data)
@@ -241,16 +279,21 @@ def ready_this_policy(policy, conf):
     if conf.ENABLED_SWPF:
         wait_for_JIT(conf)
 
+    wait_for_hwpf_throttle(hwpf_change_to, conf)
+
     conf.curr_policy = policy
 
-    print "POLMAN -- policy %s is ready on all cores"%(policy)
+    print "POLMAN -- policy %s is ready on all cores at %f seconds"%(policy, time.time() - conf.start_time)
 
 def main():
-
-    #ignore the first 5 seconds
-    time.sleep(5)
-
+    
+    start_time = time.time()
+    
+    time.sleep(1)
     conf = Conf()
+    conf.start_time = start_time
+    #ignore the first 5 seconds
+    time.sleep(9)
 
     exp_plan_idx = 0
 
@@ -267,9 +310,12 @@ def main():
             policy = EXP_PLAN[conf.NUM_APPS][exp_plan_idx]
         
             ready_this_policy(policy, conf)
-
-            monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], conf)
-
+            
+            if policy == conf.baseline:
+                monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 1, conf)
+            else:
+                monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 1, conf)
+    
         #apply policy with max performance
         print "POLMAN -- Applying best prefetching policy: %s"%(conf.max_perf_policy)
         ready_this_policy(conf.max_perf_policy, conf)
