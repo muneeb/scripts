@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 from optparse import OptionParser
+from io import BlockingIOError
 
 def enum(**enums):
     return type('Enum', (), enums)
@@ -78,7 +79,7 @@ class Conf:
         self.NUM_MON_WIN = opts.NUM_MON_WIN
         self.EXIT_AFTER= opts.EXIT_AFTER
 
-        self.rp = os.open("/tmp/PRT_POL_MAN_RECV", os.O_RDONLY )
+        self.rp = os.open("/tmp/PRT_POL_MAN_RECV", os.O_RDONLY)
         fl = fcntl.fcntl(self.rp, fcntl.F_GETFL)
         fcntl.fcntl(self.rp, fcntl.F_SETFL, fl | os.O_NONBLOCK)
 
@@ -87,7 +88,7 @@ class Conf:
     
         for core_idx in range(self.NUM_APPS):
         
-            self.rp_app.append(os.open("/tmp/PRT_SND_INFO_%d"%(core_idx), os.O_RDONLY ))
+            self.rp_app.append(os.open("/tmp/PRT_SND_INFO_%d"%(core_idx), os.O_RDONLY))
             self.wp.append(os.open("/tmp/PRT_RECV_INFO_%d"%(core_idx), os.O_WRONLY ))
             
             fl = fcntl.fcntl(self.rp_app[core_idx], fcntl.F_GETFL)
@@ -106,8 +107,9 @@ def nonblocking_readlines(fd, conf):
     while remaining_bytes > 0:
         try:
             block = os.read(fd, conf.BUF_SIZE) #read BUF_SIZE-byte chunks at a time
+        #deleteContent(fd)
         except BlockingIOError:
-            print "No communication!"
+            None
         
         remaining_bytes -= len(block)
         
@@ -116,7 +118,7 @@ def nonblocking_readlines(fd, conf):
         if not block:
             if buf:
                 buf.clear()
-            return buf
+            return None
         
         buf.extend(block)
 
@@ -168,6 +170,8 @@ def monitor_perf(policy, mon_time, conf):
         bpc[2] += bpc2
         bpc[3] += bpc3
         
+        #print "%f -- %f %f %f %f"%(time.time()-conf.start_time, bpc0,bpc1,bpc2,bpc3)
+        
         i += 1
         time.sleep(conf.SLEEP_TIME)
 
@@ -178,6 +182,7 @@ def monitor_perf(policy, mon_time, conf):
     #average recorded bpc
     for idx in range(conf.NUM_APPS):
         bpc[idx] = float(bpc[idx])/float(num_mon_wins)#conf.NUM_MON_WIN)
+    #print "bpc[%d] -- %f"%(idx,bpc[idx])
 
     AVG_PERF_BOOK[policy] = bpc
 
@@ -293,7 +298,7 @@ def main():
     conf = Conf()
     conf.start_time = start_time
     #ignore the first 5 seconds
-    time.sleep(9)
+    time.sleep(14)
 
     exp_plan_idx = 0
 
@@ -312,14 +317,16 @@ def main():
             ready_this_policy(policy, conf)
             
             if policy == conf.baseline:
-                monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 1, conf)
+                monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 0.75, conf)
             else:
-                monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 1, conf)
-    
+                monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 0.75, conf)
+
         #apply policy with max performance
         print "POLMAN -- Applying best prefetching policy: %s"%(conf.max_perf_policy)
         ready_this_policy(conf.max_perf_policy, conf)
 
+
+        conf.EXIT_AFTER -= (time.time() - conf.start_time)
 
         if conf.EXIT_AFTER >= conf.REEXP_TIME:
             #sleep until next exploration phase
