@@ -60,6 +60,10 @@ class Conf:
                         type="int", default="60",
                         dest="EXIT_AFTER",
                         help="Exit after XXX seconds of applying the optimal policy")
+        parser.add_option("-t", "--retries",
+                          type="int", default="3",
+                          dest="RETRIES",
+                          help="Number of retries to important prefetch policies")
 
         (opts, args) = parser.parse_args()
         
@@ -78,6 +82,9 @@ class Conf:
         self.REEXP_TIME = opts.REEXP_TIME
         self.NUM_MON_WIN = opts.NUM_MON_WIN
         self.EXIT_AFTER= opts.EXIT_AFTER
+        self.RETRIES = opts.RETRIES
+        self.curr_ws = 1
+        self.falsepos_count = 0
 
         self.rp = os.open("/tmp/PRT_POL_MAN_RECV", os.O_RDONLY)
         fl = fcntl.fcntl(self.rp, fcntl.F_GETFL)
@@ -170,7 +177,7 @@ def monitor_perf(policy, mon_time, conf):
         bpc[2] += bpc2
         bpc[3] += bpc3
         
-        #print "%f -- %f %f %f %f"%(time.time()-conf.start_time, bpc0,bpc1,bpc2,bpc3)
+        #print "%f -- %f %f %f %f"%(time.time()-conf.start_time, bpc0, bpc1, bpc2, bpc3)
         
         i += 1
         time.sleep(conf.SLEEP_TIME)
@@ -194,9 +201,11 @@ def monitor_perf(policy, mon_time, conf):
             conf.max_thruput = ws
             conf.max_perf_policy = policy
 
+        conf.curr_ws = float(conf.curr_ws + ws)/float(2)    # simple-moving average
+
         print "policy %s -- weighted speedup %f"%(policy, ws)
 
-def wait_for_JIT(conf):
+def wait_for_JIT(conf, revert):
 
     print "POLMAN -- Waiting for %d JIT instances to complete"%(len(conf.rp_app))
 
@@ -208,7 +217,9 @@ def wait_for_JIT(conf):
                 continue
             (comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert) = struct.unpack(conf.STRUCT_FMTSTR, data)
             
-            if swpf_status == ENUMS.SWPF_JIT_ACTIVE:
+            if not revert and swpf_status == ENUMS.SWPF_JIT_ACTIVE:
+                break
+            elif revert and swpf_status == 0:
                 break
             time.sleep(conf.SLEEP_TIME)
 
@@ -234,19 +245,20 @@ def ready_this_policy(policy, conf):
     print "\n----------------------------"
     print "POLMAN -- readying policy %s"%(policy)
     
+    
     conf.ENABLED_SWPF = False
 
     hwpf_change_to = ENUMS.HWPF_ON
 
     if policy == "hwpf":
         
-        revert = ENUMS.REVERT_TO_ORIG
-        if conf.curr_policy == "hwpf" or conf.curr_policy == "orig":
-            revert = ENUMS.NO_REVERT_TO_PREV
+        rev = ENUMS.REVERT_TO_ORIG
+        if conf.curr_policy == "hwpf" or conf.curr_policy == "nopref":
+            rev = ENUMS.NO_REVERT_TO_PREV
         
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                                             0.0, 0.0, 0.0, 0.0, 0.0, \
-                                            ENUMS.HWPF_ON, 0, revert)
+                                            ENUMS.HWPF_ON, 0, rev)
     elif policy == "swpf":
         snd_data = struct.pack("iiiiifffffiii", ENUMS.PRT_COMM_RECV, 0, 1, 2, 3, \
                              0.0, 0.0, 0.0, 0.0, 0.0, \
@@ -278,11 +290,16 @@ def ready_this_policy(policy, conf):
     for fd in conf.wp:
         send_data(fd, snd_data)
 
-    if (conf.curr_policy == "hwpf" or conf.curr_policy == "orig") and policy != conf.curr_policy:
+    revert = False
+    if (conf.curr_policy == "hwpf" or conf.curr_policy == "nopref") and policy != conf.curr_policy:
         conf.ENABLED_SWPF = True
+    elif (conf.curr_policy != "hwpf" and conf.curr_policy != "nopref") and policy != conf.curr_policy:
+        revert = True
 
     if conf.ENABLED_SWPF:
-        wait_for_JIT(conf)
+        wait_for_JIT(conf, revert)
+    elif revert:
+        wait_for_JIT(conf, revert)
 
     wait_for_hwpf_throttle(hwpf_change_to, conf)
 
@@ -314,27 +331,44 @@ def main():
         
             policy = EXP_PLAN[conf.NUM_APPS][exp_plan_idx]
         
+        #if policy == "nopref" and conf.max_perf_policy != "swpf":
+        #continue
+        
             ready_this_policy(policy, conf)
+            
+            retries = 0
             
             if policy == conf.baseline:
                 monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 0.75, conf)
             else:
-                monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 0.75, conf)
+                while retries < conf.RETRIES and conf.max_perf_policy != policy:
+                    monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 0.75, conf)
+                    retries += 1
 
         #apply policy with max performance
         print "POLMAN -- Applying best prefetching policy: %s"%(conf.max_perf_policy)
         ready_this_policy(conf.max_perf_policy, conf)
 
+        time_passed = time.time() - conf.start_time
 
-        conf.EXIT_AFTER -= (time.time() - conf.start_time)
+        while conf.EXIT_AFTER > time_passed:
+            
+            if conf.curr_policy != "hwpf":
+                monitor_perf(conf.curr_policy, 0.75, conf)
+                if conf.curr_ws < 1:
+                    conf.falsepos_count += 1
+                
+                #If too many false positives occur, revert to baseline policy
+                if conf.falsepos_count == 5:
+                    ready_this_policy(conf.baseline, conf)
+                    conf.falsepos_count = 0
+                    print "POLMAN -- Reverting to baseline policy: %s"%(conf.baseline)
+            else:
+                break
 
-        if conf.EXIT_AFTER >= conf.REEXP_TIME:
-            #sleep until next exploration phase
-            time.sleep(conf.REEXP_TIME)
-            conf.EXIT_AFTER -= conf.REEXP_TIME
-        else:
-            time.sleep(conf.EXIT_AFTER)
-            break
+            time_passed = time.time() - conf.start_time
+
+        break
 
 
 if __name__ == '__main__':
