@@ -50,7 +50,7 @@ class Conf:
                           dest="SLEEP_TIME",
                           help="Sleep time in milli-seconds")
         parser.add_option("-r", "--reexplore-in",
-                        type="int", default="7",
+                        type="int", default="5",
                         dest="REEXP_TIME",
                         help="Start re-exploration of best prefetch policy in XXX seconds")
         parser.add_option("-p", "--rep-reexplore",
@@ -58,7 +58,7 @@ class Conf:
                           dest="REP_REEXP",
                           help="Repead re-exploration this many times")
         parser.add_option("-w", "--num-mon-win",
-                          type="int", default="10",
+                          type="int", default="20",
                           dest="NUM_MON_WIN",
                           help="Number of performance windows to monitor for each policy")
         parser.add_option("-x", "--exit-after",
@@ -331,19 +331,19 @@ def reexplore_winning(conf):
     monitor_perf(conf.baseline, 0.5, conf)
 
     # will make comparison of max_perf_policy with recent baseline performance
-    ready_this_policy(curr_max_perf_policy, conf)
+    #ready_this_policy(curr_max_perf_policy, conf)
 
-    retries = 0
+#retries = 0
     
-    monitor_perf(curr_max_perf_policy, 0.5, conf)
-    while retries < (conf.RETRIES - 1) and conf.max_perf_policy != curr_max_perf_policy:
-        monitor_perf(curr_max_perf_policy, 0.5, conf)
-        retries += 1
+    #monitor_perf(curr_max_perf_policy, 0.5, conf)
+    #while retries < (conf.RETRIES - 1) and conf.max_perf_policy != curr_max_perf_policy:
+    #    monitor_perf(curr_max_perf_policy, 0.5, conf)
+    #    retries += 1
 
     # if curr_max_perf_policy still performs better than baseline, then don't explore
-    if conf.max_perf_policy == curr_max_perf_policy:
-        print >> sys.stderr, "POLMAN -- keeping policy %s"%(conf.max_perf_policy)
-        return
+    #if conf.max_perf_policy == curr_max_perf_policy:
+    #    print >> sys.stderr, "POLMAN -- keeping policy %s"%(conf.max_perf_policy)
+    #    return
 
     i = 0
 
@@ -373,8 +373,8 @@ def main():
     time.sleep(1)
     conf = Conf()
     conf.start_time = start_time
-    #ignore the first 5 seconds
-    time.sleep(14)
+    #ignore the first 10 seconds
+    time.sleep(9)
 
     exp_plan_idx = 0
 
@@ -436,7 +436,9 @@ def main():
                 if conf.falsepos_count == conf.falsepos_thr:
                     ready_this_policy(conf.baseline, conf)
                     conf.falsepos_count = 0
+                    re_explore_in = time_passed + 0.1 # restart re-exploration immediately
                     print >> sys.stderr, "POLMAN -- Reverting to baseline policy: %s"%(conf.baseline)
+                    print >> sys.stderr, "POLMAN -- Starting Re-exploration soon..."%(conf.baseline)
             else:
                 time.sleep(re_explore_in - time_passed)
                 #break
