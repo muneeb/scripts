@@ -21,7 +21,8 @@ ENUMS = enum(PRT_COMM_SEND=1, PRT_COMM_RECV=2, \
                SWPF_2MBLLC=4, SWPF_1MBLLC=5, SWPF_0MBLLC=6, SWPF_JIT_ACTIVE=7,\
                NO_REVERT_TO_PREV=0, REVERT_TO_PREV=1, REVERT_TO_ORIG=2)
 
-EXP_PLAN = {4:["hwpf", "swpf", "l1hwpfswpf", "hwpfswpf", "nopref"], \
+#4:["hwpf", "swpf", "l1hwpfswpf", "hwpfswpf", "nopref"],
+EXP_PLAN = {4:["hwpf", "swpf", "l1hwpfswpf"], \
             3:["hwpf", "l1hwpfswpf", "swpf", "hwpfswpf", "nopref"], \
             2:["hwpf", "hwpfswpf", "swpf", "l1hwpfswpf"],\
             1:["hwpf", "hwpfswpf", "l1hwpfswpf"]}
@@ -49,9 +50,13 @@ class Conf:
                           dest="SLEEP_TIME",
                           help="Sleep time in milli-seconds")
         parser.add_option("-r", "--reexplore-in",
-                        type="int", default="1000",
+                        type="int", default="7",
                         dest="REEXP_TIME",
                         help="Start re-exploration of best prefetch policy in XXX seconds")
+        parser.add_option("-p", "--rep-reexplore",
+                          type="int", default="5",
+                          dest="REP_REEXP",
+                          help="Repead re-exploration this many times")
         parser.add_option("-w", "--num-mon-win",
                           type="int", default="10",
                           dest="NUM_MON_WIN",
@@ -61,7 +66,7 @@ class Conf:
                         dest="EXIT_AFTER",
                         help="Exit after XXX seconds of applying the optimal policy")
         parser.add_option("-t", "--retries",
-                          type="int", default="3",
+                          type="int", default="5",
                           dest="RETRIES",
                           help="Number of retries to important prefetch policies")
 
@@ -83,8 +88,11 @@ class Conf:
         self.NUM_MON_WIN = opts.NUM_MON_WIN
         self.EXIT_AFTER= opts.EXIT_AFTER
         self.RETRIES = opts.RETRIES
+        self.REP_REEXP = opts.REP_REEXP
         self.curr_ws = 1
         self.falsepos_count = 0
+        self.falsepos_thr= 10
+        self.win_policies = []
 
         self.rp = os.open("/tmp/PRT_POL_MAN_RECV", os.O_RDONLY)
         fl = fcntl.fcntl(self.rp, fcntl.F_GETFL)
@@ -120,7 +128,7 @@ def nonblocking_readlines(fd, conf):
         
         remaining_bytes -= len(block)
         
-        #print "data is %d Bytes"%(len(block))
+        #print >> sys.stderr, "data is %d Bytes"%(len(block))
         
         if not block:
             if buf:
@@ -154,7 +162,7 @@ def compute_weighted_speedup(bpc_list, conf):
 
 def monitor_perf(policy, mon_time, conf):
 
-    print "POLMAN -- monitoring performance for policy %s"%(policy)
+    print >> sys.stderr, "POLMAN -- monitoring performance for policy %s"%(policy)
 
     i=0
 
@@ -177,7 +185,7 @@ def monitor_perf(policy, mon_time, conf):
         bpc[2] += bpc2
         bpc[3] += bpc3
         
-        #print "%f -- %f %f %f %f"%(time.time()-conf.start_time, bpc0, bpc1, bpc2, bpc3)
+        #print >> sys.stderr, "%f -- %f %f %f %f"%(time.time()-conf.start_time, bpc0, bpc1, bpc2, bpc3)
         
         i += 1
         time.sleep(conf.SLEEP_TIME)
@@ -189,7 +197,7 @@ def monitor_perf(policy, mon_time, conf):
     #average recorded bpc
     for idx in range(conf.NUM_APPS):
         bpc[idx] = float(bpc[idx])/float(num_mon_wins)#conf.NUM_MON_WIN)
-    #print "bpc[%d] -- %f"%(idx,bpc[idx])
+    #print >> sys.stderr, "bpc[%d] -- %f"%(idx,bpc[idx])
 
     AVG_PERF_BOOK[policy] = bpc
 
@@ -200,14 +208,17 @@ def monitor_perf(policy, mon_time, conf):
         if ws > conf.max_thruput:
             conf.max_thruput = ws
             conf.max_perf_policy = policy
+        
+        if ws > 1.0 and not policy in conf.win_policies:
+            conf.win_policies.insert(0, policy)
 
         conf.curr_ws = float(conf.curr_ws + ws)/float(2)    # simple-moving average
 
-        print "policy %s -- weighted speedup %f"%(policy, ws)
+        print >> sys.stderr, "policy %s -- weighted speedup %f"%(policy, ws)
 
 def wait_for_JIT(conf, revert):
 
-    print "POLMAN -- Waiting for %d JIT instances to complete"%(len(conf.rp_app))
+    print >> sys.stderr, "POLMAN -- Waiting for %d JIT instances to complete"%(len(conf.rp_app))
 
     for fd in conf.rp_app:
         while True:
@@ -225,7 +236,7 @@ def wait_for_JIT(conf, revert):
 
 def wait_for_hwpf_throttle(hwpf_change_to, conf):
 
-    print "POLMAN -- waiting for HWPF to change to %d"%(hwpf_change_to)
+    print >> sys.stderr, "POLMAN -- waiting for HWPF to change to %d"%(hwpf_change_to)
 
     fd = conf.rp
 
@@ -242,8 +253,8 @@ def wait_for_hwpf_throttle(hwpf_change_to, conf):
 
 def ready_this_policy(policy, conf):
 
-    print "\n----------------------------"
-    print "POLMAN -- readying policy %s"%(policy)
+    print >> sys.stderr, "\n----------------------------"
+    print >> sys.stderr, "POLMAN -- readying policy %s"%(policy)
     
     
     conf.ENABLED_SWPF = False
@@ -305,7 +316,55 @@ def ready_this_policy(policy, conf):
 
     conf.curr_policy = policy
 
-    print "POLMAN -- policy %s is ready on all cores at %f seconds"%(policy, time.time() - conf.start_time)
+    print >> sys.stderr, "POLMAN -- policy %s is ready on all cores at %f seconds"%(policy, time.time() - conf.start_time)
+
+def reexplore_winning(conf):
+    
+    print >> sys.stderr, "POLMAN -- starting Re-exploration at %f seconds"%(time.time() - conf.start_time)
+
+    curr_max_perf_policy = conf.max_perf_policy
+
+    conf.max_perf_policy = "hwpf"
+    conf.max_thruput = 1.0
+
+    ready_this_policy(conf.baseline, conf)
+    monitor_perf(conf.baseline, 0.5, conf)
+
+    # will make comparison of max_perf_policy with recent baseline performance
+    ready_this_policy(curr_max_perf_policy, conf)
+
+    retries = 0
+    
+    monitor_perf(curr_max_perf_policy, 0.5, conf)
+    while retries < (conf.RETRIES - 1) and conf.max_perf_policy != curr_max_perf_policy:
+        monitor_perf(curr_max_perf_policy, 0.5, conf)
+        retries += 1
+
+    # if curr_max_perf_policy still performs better than baseline, then don't explore
+    if conf.max_perf_policy == curr_max_perf_policy:
+        print >> sys.stderr, "POLMAN -- keeping policy %s"%(conf.max_perf_policy)
+        return
+
+    i = 0
+
+    # do one whole circle over all winnging policies, then choose the best
+    while i < len(conf.win_policies):
+        
+        policy = conf.win_policies.pop()
+        print >> sys.stderr, "POLMAN -- Re-exploration testing policy %s"%(policy)
+        
+        ready_this_policy(policy, conf)
+        
+        retries = 0
+        
+        monitor_perf(policy, 0.5, conf)
+        while retries < (conf.RETRIES - 1) and conf.max_perf_policy != policy:
+            monitor_perf(policy, 0.5, conf)
+            retries += 1
+        
+        i += 1
+
+    conf.REP_REEXP -= 1
 
 def main():
     
@@ -323,48 +382,64 @@ def main():
 
     while True:
     
-        print "POLMAN -- entering exploration phase"
+        print >> sys.stderr, "POLMAN -- entering exploration phase"
     
         time.sleep(conf.SLEEP_TIME) # sleep for 100 milli-seconds -- 2X the protean runtime
         
         for exp_plan_idx in range(total_states):
         
             policy = EXP_PLAN[conf.NUM_APPS][exp_plan_idx]
-        
-        #if policy == "nopref" and conf.max_perf_policy != "swpf":
-        #continue
-        
-            ready_this_policy(policy, conf)
             
             retries = 0
             
             if policy == conf.baseline:
-                monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 0.75, conf)
+                ready_this_policy(policy, conf)
+                monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 0.5, conf)
             else:
                 while retries < conf.RETRIES and conf.max_perf_policy != policy:
-                    monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 0.75, conf)
+                    ready_this_policy(conf.baseline, conf)
+                    monitor_perf(conf.baseline, 0.5, conf)
+                    ready_this_policy(policy, conf)
+                    monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 0.5, conf)
                     retries += 1
 
         #apply policy with max performance
-        print "POLMAN -- Applying best prefetching policy: %s"%(conf.max_perf_policy)
+        print >> sys.stderr, "POLMAN -- Applying best prefetching policy: %s"%(conf.max_perf_policy)
         ready_this_policy(conf.max_perf_policy, conf)
+
+        conf.RETRIES = 3
 
         time_passed = time.time() - conf.start_time
 
+        re_explore_in = conf.REEXP_TIME + time_passed
+
         while conf.EXIT_AFTER > time_passed:
+
+            print >> sys.stderr, "POLMAN -- re-explore in %f"%(re_explore_in - time_passed)
+            
+            if (re_explore_in - time_passed) < 0 and conf.REP_REEXP > 0:
+                reexplore_winning(conf)
+                #apply policy with max performance
+                print >> sys.stderr, "POLMAN -- Applying best prefetching policy after re-exploration: %s"%(conf.max_perf_policy)
+                ready_this_policy(conf.max_perf_policy, conf)
+                time_passed = time.time() - conf.start_time
+                re_explore_in = conf.REEXP_TIME + time_passed
             
             if conf.curr_policy != "hwpf":
-                monitor_perf(conf.curr_policy, 0.75, conf)
+                monitor_perf(conf.curr_policy, 0.5, conf)
                 if conf.curr_ws < 1:
                     conf.falsepos_count += 1
+                else:
+                    conf.falsepos_count -= 1
                 
                 #If too many false positives occur, revert to baseline policy
-                if conf.falsepos_count == 5:
+                if conf.falsepos_count == conf.falsepos_thr:
                     ready_this_policy(conf.baseline, conf)
                     conf.falsepos_count = 0
-                    print "POLMAN -- Reverting to baseline policy: %s"%(conf.baseline)
+                    print >> sys.stderr, "POLMAN -- Reverting to baseline policy: %s"%(conf.baseline)
             else:
-                break
+                time.sleep(re_explore_in - time_passed)
+                #break
 
             time_passed = time.time() - conf.start_time
 
