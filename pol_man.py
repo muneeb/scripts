@@ -61,6 +61,10 @@ class Conf:
                           type="int", default="20",
                           dest="NUM_MON_WIN",
                           help="Number of performance windows to monitor for each policy")
+        parser.add_option("-e", "--mon-epoch",
+                        type="float", default="0.5",
+                        dest="MON_EPOCH",
+                        help="Duration of monitor epoch for each policy")
         parser.add_option("-x", "--exit-after",
                         type="int", default="65",
                         dest="EXIT_AFTER",
@@ -89,9 +93,10 @@ class Conf:
         self.EXIT_AFTER= opts.EXIT_AFTER
         self.RETRIES = opts.RETRIES
         self.REP_REEXP = opts.REP_REEXP
+        self.MON_EPOCH = opts.MON_EPOCH
         self.curr_ws = 1
         self.falsepos_count = 0
-        self.falsepos_thr= 5
+        self.falsepos_thr= 4
         self.win_policies = []
         self.backoff_reexp_time = self.REEXP_TIME
 
@@ -345,13 +350,15 @@ def reexplore_winning(conf):
 
     i = 0
 
+    conf.win_policies = ["swpf", "l1hwpfswpf", "hwpfswpf"]
+
     win_policies_count = len(conf.win_policies)
 
     # do one whole circle over all winnging policies, then choose the best
     while i < win_policies_count:
         
         ready_this_policy(conf.baseline, conf)
-        monitor_perf(conf.baseline, 0.5, conf)
+        monitor_perf(conf.baseline, conf.MON_EPOCH, conf)
         
         policy = conf.win_policies.pop()
         print >> sys.stderr, "POLMAN -- Re-exploration testing policy %s"%(policy)
@@ -360,9 +367,9 @@ def reexplore_winning(conf):
         
         retries = 0
         
-        monitor_perf(policy, 0.5, conf)
+        monitor_perf(policy, conf.MON_EPOCH, conf)
         while retries < (conf.RETRIES - 1) and conf.max_perf_policy != policy:
-            monitor_perf(policy, 0.5, conf)
+            monitor_perf(policy, conf.MON_EPOCH, conf)
             retries += 1
         
         i += 1
@@ -400,6 +407,8 @@ def main():
             
             retries = 0
             
+	    #ready_this_policy(policy, conf)
+
             if policy == conf.baseline:
                 #ready_this_policy(policy, conf)
                 #monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 0.5, conf)
@@ -407,9 +416,9 @@ def main():
             else:
                 while retries < conf.RETRIES and conf.max_perf_policy != policy:
                     ready_this_policy(conf.baseline, conf)
-                    monitor_perf(conf.baseline, 0.5, conf)
+                    monitor_perf(conf.baseline, conf.MON_EPOCH, conf)
                     ready_this_policy(policy, conf)
-                    monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], 0.5, conf)
+                    monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], conf.MON_EPOCH, conf)
                     retries += 1
 
         #apply policy with max performance
@@ -436,7 +445,7 @@ def main():
                 conf.falsepos_count = 0
             
             if conf.curr_policy != "hwpf":
-                monitor_perf(conf.curr_policy, 0.5, conf)
+                monitor_perf(conf.curr_policy, conf.MON_EPOCH, conf)
                 if conf.curr_ws < 1:
                     conf.falsepos_count += 1
                 else:
