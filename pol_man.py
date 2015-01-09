@@ -23,7 +23,7 @@ ENUMS = enum(PRT_COMM_SEND=1, PRT_COMM_RECV=2, \
 
 #4:["hwpf", "swpf", "l1hwpfswpf", "hwpfswpf", "nopref"],
 EXP_PLAN = {4:["hwpf", "swpf", "l1hwpfswpf", "hwpfswpf"], \
-            3:["hwpf", "l1hwpfswpf", "swpf", "hwpfswpf", "nopref"], \
+            3:["hwpf", "l1hwpfswpf", "swpf", "hwpfswpf"], \
             2:["hwpf", "hwpfswpf", "swpf", "l1hwpfswpf"],\
             1:["hwpf", "hwpfswpf", "l1hwpfswpf"]}
 
