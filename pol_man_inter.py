@@ -315,7 +315,8 @@ def ready_this_policy(policy, conf):
 
 def reset_AVG_PERF_BOOK():
 
-    AVG_PERF_BOOK={}
+    for policy in AVG_PERF_BOOK:
+        AVG_PERF_BOOK[policy] = [0.0, 0.0, 0.0, 0.0]
 
 def reexplore_winning(conf):
     
@@ -323,41 +324,48 @@ def reexplore_winning(conf):
 
     curr_max_perf_policy = conf.max_perf_policy
 
-    conf.max_perf_policy = "hwpf"
+    conf.max_perf_policy = conf.baseline
     conf.max_thruput = 1.0
 
     total_states = len(EXP_PLAN[conf.NUM_APPS])
     
     num_mon_wins = int(conf.MON_EPOCH / conf.SLEEP_TIME)
     
-    reset_AVG_PERF_BOOK()
+    retries = 0
     
-    for rep_idx in range(num_mon_wins):
-        
-        #ready_this_policy(conf.baseline, conf)
-        #monitor_perf(conf.baseline, conf.SLEEP_TIME, conf)
-        
-        for exp_plan_idx in range(total_states):
+    while retries < conf.RETRIES:
+    
+        reset_AVG_PERF_BOOK()
+    
+        for rep_idx in range(num_mon_wins):
             
-            policy = EXP_PLAN[conf.NUM_APPS][exp_plan_idx]
-            ready_this_policy(policy, conf)
-            monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], conf.SLEEP_TIME, conf)
-
-
-    for policy in EXP_PLAN[conf.NUM_APPS]:
-        
-        if policy == "hwpf":
-            continue
+            #ready_this_policy(conf.baseline, conf)
+            #monitor_perf(conf.baseline, conf.SLEEP_TIME, conf)
             
-        bpc_list = AVG_PERF_BOOK[policy]
-        ws = compute_weighted_speedup(bpc_list, conf)
-        PERF_BOOK[policy] = ws
-        
-        if ws > conf.max_thruput:
-            conf.max_thruput = ws
-            conf.max_perf_policy = policy
+            for exp_plan_idx in range(total_states):
+                
+                policy = EXP_PLAN[conf.NUM_APPS][exp_plan_idx]
+                ready_this_policy(policy, conf)
+                monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], conf.SLEEP_TIME, conf)
 
-        print >> sys.stderr, "policy %s -- weighted speedup %f"%(policy, ws)
+        for policy in EXP_PLAN[conf.NUM_APPS]:
+            
+            if policy == "hwpf":
+                continue
+                
+            bpc_list = AVG_PERF_BOOK[policy]
+            ws = compute_weighted_speedup(bpc_list, conf)
+            PERF_BOOK[policy] = ws
+            
+            if ws > conf.max_thruput:
+                conf.max_thruput = ws
+                conf.max_perf_policy = policy
+
+            print >> sys.stderr, "policy %s -- weighted speedup %f"%(policy, ws)
+
+        retries += 1
+        if conf.max_perf_policy != conf.baseline:
+            break
 
 #    if curr_max_perf_policy == conf.max_perf_policy:
 #        if conf.backoff_reexp_time < 15:
@@ -375,33 +383,44 @@ def explore_policies(conf):
 
     num_mon_wins = int(conf.MON_EPOCH / conf.SLEEP_TIME)
 
-    reset_AVG_PERF_BOOK()
+    conf.max_perf_policy = conf.baseline
+    conf.max_thruput = 1.0
 
-    for rep_idx in range(num_mon_wins):
+    retries = 0
 
-        #ready_this_policy(conf.baseline, conf)
-        #monitor_perf(conf.baseline, conf.SLEEP_TIME, conf)
+    while retries < conf.RETRIES:
 
-        for exp_plan_idx in range(total_states):
-            
-            policy = EXP_PLAN[conf.NUM_APPS][exp_plan_idx]
-            ready_this_policy(policy, conf)
-            monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], conf.SLEEP_TIME, conf)
+        reset_AVG_PERF_BOOK()
 
-    for policy in EXP_PLAN[conf.NUM_APPS]:
+        for rep_idx in range(num_mon_wins):
 
-        if policy == "hwpf":
-            continue
-    
-        bpc_list = AVG_PERF_BOOK[policy]
-        ws = compute_weighted_speedup(bpc_list, conf)
-        PERF_BOOK[policy] = ws
-            
-        if ws > conf.max_thruput:
-            conf.max_thruput = ws
-            conf.max_perf_policy = policy
+            #ready_this_policy(conf.baseline, conf)
+            #monitor_perf(conf.baseline, conf.SLEEP_TIME, conf)
+
+            for exp_plan_idx in range(total_states):
+                
+                policy = EXP_PLAN[conf.NUM_APPS][exp_plan_idx]
+                ready_this_policy(policy, conf)
+                monitor_perf(EXP_PLAN[conf.NUM_APPS][exp_plan_idx], conf.SLEEP_TIME, conf)
+
+        for policy in EXP_PLAN[conf.NUM_APPS]:
+
+            if policy == "hwpf":
+                continue
         
-        print >> sys.stderr, "policy %s -- weighted speedup %f"%(policy, ws)
+            bpc_list = AVG_PERF_BOOK[policy]
+            ws = compute_weighted_speedup(bpc_list, conf)
+            PERF_BOOK[policy] = ws
+                
+            if ws > conf.max_thruput:
+                conf.max_thruput = ws
+                conf.max_perf_policy = policy
+            
+            print >> sys.stderr, "policy %s -- weighted speedup %f"%(policy, ws)
+
+        retries += 1
+        if conf.max_perf_policy != conf.baseline:
+            break
 
     conf.curr_ws = conf.max_thruput
 
@@ -420,7 +439,7 @@ def monitor_best_policy(conf):
             
             policy = mon_list[exp_plan_idx]
             ready_this_policy(policy, conf)
-            monitor_perf(mon_list[exp_plan_idx], conf.SLEEP_TIME, conf)
+            monitor_perf(policy, conf.SLEEP_TIME, conf)
 
     bpc_list = AVG_PERF_BOOK[conf.max_perf_policy]
     ws = compute_weighted_speedup(bpc_list, conf)
@@ -429,9 +448,9 @@ def monitor_best_policy(conf):
     if ws > conf.max_thruput:
         conf.max_thruput = ws
     
-    conf.curr_ws = ws #float(conf.curr_ws + ws)/float(2)    # simple-moving average
+    conf.curr_ws = ws
 
-    if conf.curr_ws < 1:
+    if conf.curr_ws < 1.0:
         conf.falsepos_count += 1
     else:
         conf.falsepos_count -= 1
