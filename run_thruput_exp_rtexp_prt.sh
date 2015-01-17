@@ -26,15 +26,16 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${SBO_PATH}/runtime:/home/muneeb/perf
 export PRT_ENABLED=1
 export SBO_OPTIMIZER=4
 export SBO_SHUTTER_EVERY=100
-export SBO_SAMPLE_PERIOD=25000 #50000
+export SBO_SAMPLE_PERIOD=12500 #0
+export SBO_PC_PERIOD=${SBO_SAMPLE_PERIOD}
 
-POL_MAN_NUM_WIN=5
+POL_MAN_NUM_WIN=5 #10
 POL_MAN_SLEEP_TIME=$(echo ${SBO_SAMPLE_PERIOD}"/1000000" | bc -l)
 POL_MAN_MON_EPOCH=$(echo ${POL_MAN_SLEEP_TIME}"*"${POL_MAN_NUM_WIN} | bc -l)
 
 RUN_DUR=120
 
-MIX_FILE=comb_4x_160.csv #rerun_mixes.csv #comb_4x_160.csv #test_comb.csv
+MIX_FILE=rerun_mixes.csv #comb_3x_100.csv #rerun_mixes.csv #comb_4x_160.csv #test_comb.csv
 
 while read line
 do
@@ -80,6 +81,10 @@ do
                 ;;
             3)
                 export SBO_CORE_BIND_LAPTRT=3
+                if [[ ${CORE_ID} == 1 ]]
+                then
+                    export SBO_CORE_BIND_LAPTRT=7
+                fi
                 ;;
             4)
                 export SBO_CORE_BIND_LAPTRT=$((${CORE_ID}+4))
@@ -117,9 +122,14 @@ do
 
     cd ${SCRIPTS_HOME}
 
-    #./pol_man.py -s ${POL_MAN_SLEEP_TIME} -p 100 -e ${POL_MAN_MON_EPOCH} -t 4 -n ${NUM_BENCHS} -x ${RUN_DUR} &> ${PROTEAN_HOME}/polman_${MIX// /_}.log &
-
-    ./pol_man_inter.py -s ${POL_MAN_SLEEP_TIME} -p 100 -e ${POL_MAN_MON_EPOCH} -t 4 -n ${NUM_BENCHS} -x ${RUN_DUR} &> ${PROTEAN_HOME}/polman_${MIX// /_}.log &
+    if [[ ${NUM_BENCHS} == 3 ]]
+    then
+        taskset -c 7 ./pol_man_inter.py -s ${POL_MAN_SLEEP_TIME} -p 100 -e ${POL_MAN_MON_EPOCH} -t 4 -n ${NUM_BENCHS} -x ${RUN_DUR} -r 120 &> ${PROTEAN_HOME}/polman_${MIX// /_}.log &
+        #taskset -c 7 ./pol_man.py -s ${POL_MAN_SLEEP_TIME} -p 100 -e ${POL_MAN_MON_EPOCH} -t 4 -n ${NUM_BENCHS} -x ${RUN_DUR} &> ${PROTEAN_HOME}/polman_${MIX// /_}.log &
+    else
+        #./pol_man.py -s ${POL_MAN_SLEEP_TIME} -p 100 -e ${POL_MAN_MON_EPOCH} -t 4 -n ${NUM_BENCHS} -x ${RUN_DUR} &> ${PROTEAN_HOME}/polman_${MIX// /_}.log &
+        ./pol_man_inter.py -s ${POL_MAN_SLEEP_TIME} -p 100 -e ${POL_MAN_MON_EPOCH} -t 4 -n ${NUM_BENCHS} -x ${RUN_DUR} -r 10 &> ${PROTEAN_HOME}/polman_${MIX// /_}.log &
+    fi
 
     sleep ${RUN_DUR}
 
@@ -136,6 +146,7 @@ do
     done
 
     killall -9 pol_man.py
+    killall -9 pol_man_inter.py
 
 done < ${MIX_FILE}
 
@@ -148,17 +159,7 @@ fi
 
 cd ${PROTEAN_HOME}
 
-#for file in $(ls rep4prt_thruput_rtexp_4x*)
-#do
-#    OUTFILE=$(echo ${file} | sed 's/rep4prt_thruput_rtexp_4x_//g' | sed 's/.out//g')
-#    echo ${file}
-#    REC=$(./process_rel_thruput_rep4prt_data.py -i ${file} -d 45)
-#    SETNGS="RTEXP-"$(grep "Applying best prefetching policy" ${PROTEAN_HOME}/polman_${OUTFILE}.log | awk '{print $7}')
-#    echo ${SETNGS}" "${REC} > thruput_rtexp_4x_mix_prt_${OUTFILE}.out
-#    grep "HWPF " thruput_rel_4x_mix_prt_${OUTFILE}.out >> thruput_rtexp_4x_mix_prt_${OUTFILE}.out
-#done
-
-for file in $(ls thruput_rtexp_4x_mix_prt_*.out); do cat ${file} | sed 's/after //g' > .tmp; mv .tmp ${file}; done
+for file in $(ls thruput_rtexp_${NUM_BENCHS}x_mix_prt_*.out); do cat ${file} | sed 's/after //g' > .tmp; mv .tmp ${file}; done
 
 ./print_thruput_rtexp_inc_exp_perf_stats.sh
 
