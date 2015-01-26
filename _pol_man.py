@@ -23,7 +23,7 @@ ENUMS = enum(PRT_COMM_SEND=1, PRT_COMM_RECV=2, \
 
 #4:["hwpf", "swpf", "l1hwpfswpf", "hwpfswpf", "nopref"],
 EXP_PLAN = {4:["hwpf", "swpf", "l1hwpfswpf", "hwpfswpf"], \
-            3:["hwpf", "l1hwpfswpf", "swpf"], \
+            3:["hwpf", "l1hwpfswpf", "hwpfswpf", "swpf"], \
             2:["hwpf", "hwpfswpf", "l1hwpfswpf"],\
             1:["hwpf", "hwpfswpf", "l1hwpfswpf"]}
 
@@ -36,6 +36,7 @@ BPC_ACC_SCORE_POL = {}
 BPC_SMP_COUNT = {}
 TIME_ACC_BOOK = {}
 OVERALL_PERF = []
+WS_BOOK = []
 
 class Conf:
     def __init__(self):
@@ -174,6 +175,57 @@ def send_data(fd, snd_data):
 def deleteContent(fd):
     os.ftruncate(fd, 0)
     os.lseek(fd, 0, os.SEEK_SET)
+
+def policy_mon_duration(policy):
+
+    if not policy in BPC_SMP_COUNT:
+        return 0
+
+    total = 0
+    for pol in BPC_SMP_COUNT:
+        total += BPC_SMP_COUNT[pol]
+
+    return float(BPC_SMP_COUNT[policy])/float(total)
+
+
+def compare_policies_perf(conf):
+    
+    policy1 = conf.win_policies[0]
+    policy2 = conf.win_policies[1]
+    
+    pol1_bpc_list = AVG_PERF_BOOK[policy1]
+    pol2_bpc_list = AVG_PERF_BOOK[policy2]
+    ws = 0.0
+    
+    for idx in range(conf.NUM_APPS):
+        ws += float(pol1_bpc_list[idx])/float(pol2_bpc_list[idx])
+    
+    if (float(ws)/float(conf.NUM_APPS)) < 1.0:
+        return policy2
+    else:
+        return policy1
+
+def find_top2_policies(conf):
+
+    max_ws = 0
+    max_perf_policy = conf.baseline
+    top2_pol_list = [max_perf_policy]
+
+    for policy in AVG_PERF_BOOK:
+        if policy == conf.baseline:
+            continue
+        
+        bpc_list = AVG_PERF_BOOK[policy]
+        ws = compute_weighted_speedup(bpc_list, conf)
+
+        if ws > max_ws:
+            max_ws = ws
+            top2_pol_list.insert(0, policy)
+            if len(top2_pol_list) > 2:
+                top2_pol_list.pop()
+
+    return top2_pol_list
+
 
 def compute_weighted_speedup(bpc_list, conf):
 
@@ -414,11 +466,15 @@ def reexplore_winning(conf):
     i = 0
 
     if conf.NUM_APPS > 2:
-        conf.win_policies = ["swpf", "hwpfswpf", "l1hwpfswpf"]
+        conf.win_policies = ["hwpfswpf", "swpf", "l1hwpfswpf"]
     else:
         conf.win_policies = ["hwpfswpf", "l1hwpfswpf"]
 
+    conf.win_policies = find_top2_policies(conf)
+
     win_policies_count = len(conf.win_policies)
+
+    print >> sys.stderr, "POLMAN -- Top 2 performing policies",(conf.win_policies)
 
     # do one whole circle over all winnging policies, then choose the best
     while i < win_policies_count:
@@ -428,6 +484,9 @@ def reexplore_winning(conf):
         
         policy = conf.win_policies.pop()
         print >> sys.stderr, "POLMAN -- Re-exploration testing policy %s"%(policy)
+        
+        if policy == conf.baseline:
+            continue
         
         ready_this_policy(policy, conf)
         
@@ -439,6 +498,10 @@ def reexplore_winning(conf):
             retries += 1
         
         i += 1
+
+    #conf.max_perf_policy = compare_policies_perf(conf)
+
+    #ready_this_policy(conf.max_perf_policy, conf)
 
 #   if curr_max_perf_policy == conf.max_perf_policy:
 #        conf.backoff_reexp_time += 5
@@ -456,13 +519,17 @@ def monitor_best_policy(conf):
     max_ws = 0
     prev_policy = conf.max_perf_policy
     
-    if conf.mon_baseline_after == 0:
+    print >> sys.stderr, "policy monitor duration %f"%(policy_mon_duration(conf.baseline))
+    
+    if policy_mon_duration(conf.baseline) < 0.15: #conf.mon_baseline_after == 0:
         mon_list = [conf.baseline, conf.max_perf_policy]
         #for policy in conf.win_policies:
             #if not policy in mon_list:
             #   mon_list.append(policy)
-    
+        
+        conf.MON_BASELINE_AFTER_ITER += 2
         conf.mon_baseline_after = conf.MON_BASELINE_AFTER_ITER
+        print >> sys.stderr, "Monitor baseline after ... %d sec"%(conf.MON_BASELINE_AFTER_ITER)
 
     for policy in mon_list:
         
@@ -584,7 +651,7 @@ def main():
                 #if conf.falsepos_count == conf.falsepos_thr or conf.exp_overhead > conf.SLOWDOWN_QUOTA:
                 if conf.consec_beating >= 2 or conf.falsepos_count == conf.falsepos_thr or conf.exp_overhead > conf.SLOWDOWN_QUOTA:
                     conf.reexp_fail_count += 1
-                    ready_this_policy(conf.baseline, conf)
+                    #ready_this_policy(conf.baseline, conf)
                     conf.falsepos_count = 0
                     re_explore_in = time_passed + 0 # restart re-exploration immediately
                     if conf.exp_overhead > conf.SLOWDOWN_QUOTA:
