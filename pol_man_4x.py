@@ -139,9 +139,8 @@ class Conf:
             fl = fcntl.fcntl(self.wp[core_idx], fcntl.F_GETFL)
             fcntl.fcntl(self.wp[core_idx], fcntl.F_SETFL, fl | os.O_NONBLOCK)
 
-        empty_list = [0, 0, 0, 0]
         for policy in EXP_PLAN[self.NUM_APPS]:
-            BPC_ACC_SCORE_POL[policy] = empty_list
+            BPC_ACC_SCORE_POL[policy] = [0.0, 0.0, 0.0, 0.0]
             BPC_SMP_COUNT[policy] = 0
             TIME_ACC_BOOK[policy] = 0
             AVG_PERF_BOOK[policy] = [0, 0, 0, 0]
