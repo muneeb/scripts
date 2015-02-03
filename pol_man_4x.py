@@ -81,7 +81,7 @@ class Conf:
                           dest="RETRIES",
                           help="Number of retries to important prefetch policies")
         parser.add_option("-q", "--exp-quota",
-                        type="float", default="0.15",
+                        type="float", default="0.10",
                         dest="EXP_QUOTA_FRAC",
                         help="Exploration quota fraction. Fraction of total time that can be spent in exploration")
 
@@ -245,7 +245,10 @@ def select_best_policy(conf):
     policy_change_rate_list.sort(key=lambda tup: tup[1], reverse=True)
 
     time_passed = time.time() - conf.start_time
-    print >> sys.stderr, "POLMAN -- %.2f sec consec_beating %d  policy_change_rate_list"%(time_passed, conf.consec_beating), policy_change_rate_list
+    print >> sys.stderr, "POLMAN -- policy %s @ %.2f sec consec_beating %d  policy_change_rate_list"%(conf.curr_policy, time_passed, conf.consec_beating), policy_change_rate_list
+
+    if conf.curr_policy == conf.baseline:
+        conf.consec_beating += 1
 
     if conf.consec_beating > 2:
         conf.consec_beating = 0
@@ -327,9 +330,9 @@ def monitor_perf(policy, mon_time, conf):
         bpc_list = AVG_PERF_BOOK[pol]
         ws = compute_weighted_speedup(bpc_list, conf)
         
-        if pol == policy:
-            POL_AVG_CHANGE_RATE[pol] = round(float(POL_AVG_CHANGE_RATE[pol] + (ws - prev_ws))/float(2), 2) #moving average
-            print >> sys.stderr, "policy %s -- weighted speedup %f "%(policy, ws)
+        #if pol == policy:
+        POL_AVG_CHANGE_RATE[pol] = round(float(POL_AVG_CHANGE_RATE[pol] + (ws - WS_BOOK[pol]))/float(2), 3) #moving average
+        print >> sys.stderr, "policy %s -- weighted speedup %f "%(policy, ws)
 
         if ws > max_ws:
             max_ws = ws
@@ -344,7 +347,7 @@ def monitor_perf(policy, mon_time, conf):
 
     if POL_AVG_CHANGE_RATE[policy] < 0.0:
         conf.consec_beating += 1
-    else:
+    elif policy != conf.baseline:
         conf.consec_beating = 0
 
     for policy in BPC_SMP_COUNT:
@@ -599,6 +602,8 @@ def main():
                 reexplore_winning(conf)
                 time_passed = time.time() - conf.start_time
                 re_explore_in = time_passed + conf.REEXP_TIME
+            
+                print >> sys.stderr, "POLMAN -- exp_quota_used %f sec of %f sec"%(conf.exp_quota_used, conf.EXP_QUOTA)
 
             if conf.REP_REEXP == 0:
                 break
