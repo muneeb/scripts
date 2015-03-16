@@ -23,7 +23,7 @@ ENUMS = enum(PRT_COMM_SEND=1, PRT_COMM_RECV=2, \
 
 #4:["hwpf", "swpf", "l1hwpfswpf", "hwpfswpf", "nopref"],
 EXP_PLAN = {4:["hwpf", "swpf", "l1hwpfswpf"], \
-            3:["hwpf", "l1hwpfswpf", "swpf"], \
+            3:["hwpf", "hwpfswpf", "l1hwpfswpf", "swpf"], \
             2:["hwpf", "hwpfswpf", "l1hwpfswpf"],\
             1:["hwpf", "hwpfswpf", "l1hwpfswpf"]}
 
@@ -38,6 +38,7 @@ POL_AVG_CHANGE_RATE = {}
 TIME_ACC_BOOK = {}
 OVERALL_PERF = []
 WS_BOOK = {}
+CURR_NEGATIVE_DIFF_SCORE = {}
 
 class Conf:
     def __init__(self):
@@ -72,6 +73,10 @@ class Conf:
                         type="float", default="0.5",
                         dest="MON_EPOCH",
                         help="Duration of monitor epoch for each policy")
+        parser.add_option("-c", "--phase-change-sensitivity",
+                          type="float", default="0.09",
+                          dest="PHASE_CHANGE_FRAC",
+                          help="% change in performance indicating a phase change")
         parser.add_option("-x", "--exit-after",
                         type="int", default="65",
                         dest="EXIT_AFTER",
@@ -120,6 +125,10 @@ class Conf:
         self.MON_BASELINE_AFTER_ITER = 4
         self.mon_baseline_after = self.MON_BASELINE_AFTER_ITER
         self.exp_overhead = 0.0
+        self.curr_sys_bw = 0.0
+        self.time_passed = 0.0
+        self.reexp_active = False
+        self.PHASE_CHANGE_FRAC = opts.PHASE_CHANGE_FRAC
 
         self.rp = os.open("/tmp/PRT_POL_MAN_RECV", os.O_RDONLY)
         fl = fcntl.fcntl(self.rp, fcntl.F_GETFL)
@@ -146,6 +155,7 @@ class Conf:
             AVG_PERF_BOOK[policy] = [0, 0, 0, 0]
             POL_AVG_CHANGE_RATE[policy] = 0.0
             WS_BOOK[policy] = 0.0
+            CURR_NEGATIVE_DIFF_SCORE[policy] = 0.0
 
 def nonblocking_readlines(fd, conf):
 
@@ -240,12 +250,12 @@ def select_best_policy(conf):
     policy_change_rate_list = []
 
     for policy in POL_AVG_CHANGE_RATE:
-        policy_change_rate_list.append((policy, WS_BOOK[policy], POL_AVG_CHANGE_RATE[policy]))
+        policy_change_rate_list.append((policy, WS_BOOK[policy], POL_AVG_CHANGE_RATE[policy], CURR_NEGATIVE_DIFF_SCORE[policy]))
 
     policy_change_rate_list.sort(key=lambda tup: tup[1], reverse=True)
 
-    time_passed = time.time() - conf.start_time
-    print >> sys.stderr, "POLMAN -- policy %s @ %.2f sec consec_beating %d  policy_change_rate_list"%(conf.curr_policy, time_passed, conf.consec_beating), policy_change_rate_list
+    conf.time_passed = time.time() - conf.start_time
+    print >> sys.stderr, "POLMAN -- policy %s @ %.2f sec consec_beating %d  policy_change_rate_list"%(conf.curr_policy, conf.time_passed, conf.consec_beating), policy_change_rate_list
 
     if conf.curr_policy == conf.baseline:
         conf.consec_beating += 1
@@ -253,10 +263,10 @@ def select_best_policy(conf):
     if conf.consec_beating > 2:
         conf.consec_beating = 0
 
-        selected_policy = policy_change_rate_list[0][0]
+    selected_policy = policy_change_rate_list[0][0]
 
-        ready_this_policy(selected_policy, conf)
-        print >> sys.stderr, "POLMAN -- Policy changed to %s"%(selected_policy)
+    ready_this_policy(selected_policy, conf)
+    print >> sys.stderr, "POLMAN -- Policy changed to %s"%(selected_policy)
 
 
 def compute_weighted_speedup(bpc_list, conf):
@@ -322,7 +332,7 @@ def monitor_perf(policy, mon_time, conf):
     for idx in range(conf.NUM_APPS):
         AVG_PERF_BOOK[policy][idx] = float(BPC_ACC_SCORE_POL[policy][idx])/float(BPC_SMP_COUNT[policy])
 
-    if policy != conf.PRIORITIZED_POLICY:
+    if policy != conf.PRIORITIZED_POLICY and conf.reexp_active:
         conf.exp_quota_used += mon_time
 
     max_ws = 0.0
@@ -331,8 +341,11 @@ def monitor_perf(policy, mon_time, conf):
         ws = compute_weighted_speedup(bpc_list, conf)
         
         #if pol == policy:
-        POL_AVG_CHANGE_RATE[pol] = round(float(POL_AVG_CHANGE_RATE[pol] + (ws - WS_BOOK[pol]))/float(2), 3) #moving average
-        print >> sys.stderr, "policy %s -- weighted speedup %f "%(policy, ws)
+        POL_AVG_CHANGE_RATE[pol] = round((ws - WS_BOOK[pol]), 3)#round(float(POL_AVG_CHANGE_RATE[pol] + (ws - WS_BOOK[pol]))/float(2), 3) #moving average
+        if pol == policy:
+            print >> sys.stderr, "policy %s @ time %f -- weighted speedup %f - offchip bandwidth %f GB/s"%(policy, conf.time_passed, ws, sys_bw)
+            conf.curr_sys_bw = sys_bw
+            conf.curr_ws = ws
 
         if ws > max_ws:
             max_ws = ws
@@ -347,8 +360,10 @@ def monitor_perf(policy, mon_time, conf):
 
     if POL_AVG_CHANGE_RATE[policy] < 0.0:
         conf.consec_beating += 1
+        CURR_NEGATIVE_DIFF_SCORE[policy] += POL_AVG_CHANGE_RATE[policy]
     elif policy != conf.baseline:
         conf.consec_beating = 0
+        CURR_NEGATIVE_DIFF_SCORE[policy] += POL_AVG_CHANGE_RATE[policy]
 
     for policy in BPC_SMP_COUNT:
         print >> sys.stderr, "%s -- bpc_acc %f sec  --  bpc_list"%(policy, BPC_SMP_COUNT[policy]), AVG_PERF_BOOK[policy]
@@ -457,7 +472,11 @@ def ready_this_policy(policy, conf):
 
 def reexplore_winning(conf):
     
-    print >> sys.stderr, "POLMAN -- starting Re-exploration at %f seconds"%(time.time() - conf.start_time)
+    conf.reexp_active = True
+    
+    conf.time_passed = time.time() - conf.start_time
+    
+    print >> sys.stderr, "POLMAN -- starting Re-exploration at %f seconds"%(conf.time_passed)
 
     curr_max_perf_policy = conf.max_perf_policy
 
@@ -476,6 +495,9 @@ def reexplore_winning(conf):
     else:
         conf.win_policies = ["hwpfswpf", "l1hwpfswpf"]
 
+#   if conf.exp_quota_used > conf.EXP_QUOTA:
+#        conf.win_policies = [conf.baseline]
+
     win_policies_count = len(conf.win_policies)
 
     print >> sys.stderr, "POLMAN -- 2 policies to explore",(conf.win_policies)
@@ -485,21 +507,33 @@ def reexplore_winning(conf):
         
         policy = conf.win_policies[i]
         
+        conf.time_passed = time.time() - conf.start_time
+        
         ready_this_policy(policy, conf)
         monitor_perf(policy, conf.MON_EPOCH, conf)
         print >> sys.stderr, "POLMAN -- Re-exploration testing policy %s"%(policy)
+        
+        policy_change_rate_list = []
+        for pol in POL_AVG_CHANGE_RATE:
+            policy_change_rate_list.append((pol, WS_BOOK[pol], POL_AVG_CHANGE_RATE[pol]))
+    
+        policy_change_rate_list.sort(key=lambda tup: tup[1], reverse=True)
+
+        print >> sys.stderr, "POLMAN -- policy %s @ %.2f sec consec_beating %d policy_change_rate_list"%(conf.curr_policy, conf.time_passed, conf.consec_beating), policy_change_rate_list
         
         i += 1
 
     #conf.max_perf_policy = compare_policies_perf(conf)
 
-    if conf.exp_quota_used > (conf.EXP_QUOTA * 0.5):
-        print >> sys.stderr, "POLMAN -- Applying best prefetching policy after re-exploration: %s"%(conf.max_perf_policy)
-        ready_this_policy(conf.max_perf_policy, conf)
-    else:
-        ready_this_policy(conf.PRIORITIZED_POLICY, conf)
+#if conf.exp_quota_used > (conf.EXP_QUOTA * 0.5):
+#        print >> sys.stderr, "POLMAN -- Applying best prefetching policy after re-exploration: %s"%(conf.max_perf_policy)
+#        ready_this_policy(conf.max_perf_policy, conf)
+#    else:
+    ready_this_policy(conf.PRIORITIZED_POLICY, conf)
 
     conf.REP_REEXP -= 1
+
+    conf.reexp_active = False
 
 def monitor_best_policy(conf):
     
@@ -581,27 +615,29 @@ def main():
     
         print >> sys.stderr, "POLMAN -- entering exploration phase"
     
-        time_passed = time.time() - conf.start_time
+        conf.time_passed = time.time() - conf.start_time
 
-        re_explore_in = time_passed + conf.REEXP_TIME
+        re_explore_in = conf.time_passed + conf.REEXP_TIME
 
         hwpf_best_count = 0
 
-        while conf.EXIT_AFTER > time_passed:
+        while conf.EXIT_AFTER > conf.time_passed:
             
             monitor_perf(conf.curr_policy, conf.MON_EPOCH, conf)
 
-            print >> sys.stderr, "POLMAN -- re-explore in %f"%(re_explore_in - time_passed)
+            #print >> sys.stderr, "POLMAN -- re-explore in %f"%(re_explore_in - conf.time_passed)
+            #print >> sys.stderr, "POLMAN -- policy %s @ time %f offchip bandwidth %f GB/s"%(conf.curr_policy, conf.time_passed, conf.curr_sys_bw)
             print >> sys.stderr, "POLMAN -- exploration overhead %f sec -- overall speedup %f"%(float(conf.exp_overhead), float(sum(OVERALL_PERF))/float(len(OVERALL_PERF)))
 
             select_best_policy(conf)
 
-            time_passed = time.time() - conf.start_time
+            conf.time_passed = time.time() - conf.start_time
 
-            if (re_explore_in - time_passed) < 0.1 and conf.exp_quota_used < conf.EXP_QUOTA:
+            if ((re_explore_in - conf.time_passed) < 0.05 and conf.exp_quota_used < conf.EXP_QUOTA) or (abs(CURR_NEGATIVE_DIFF_SCORE[conf.curr_policy]) > conf.PHASE_CHANGE_FRAC):
+                CURR_NEGATIVE_DIFF_SCORE[conf.curr_policy] = 0
                 reexplore_winning(conf)
-                time_passed = time.time() - conf.start_time
-                re_explore_in = time_passed + conf.REEXP_TIME
+                conf.time_passed = time.time() - conf.start_time
+                re_explore_in = conf.time_passed + conf.REEXP_TIME
             
                 print >> sys.stderr, "POLMAN -- exp_quota_used %f sec of %f sec"%(conf.exp_quota_used, conf.EXP_QUOTA)
 
