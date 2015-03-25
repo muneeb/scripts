@@ -15,7 +15,7 @@ from io import BlockingIOError
 def enum(**enums):
     return type('Enum', (), enums)
 
-ENUMS = enum(PRT_COMM_SEND=1, PRT_COMM_RECV=2, PRT_COMM_SMP_FAIL=3, PRT_COMM_APP_EXIT=4, \
+ENUMS = enum(PRT_COMM_SEND=1, PRT_COMM_RECV=2, \
                HWPF_ON=0, LLC_HWPF_OFF=1, HWPF_OFF=2, \
                SWPF_8MBLLC=1, SWPF_6MBLLC=2, SWPF_4MBLLC=3, \
                SWPF_2MBLLC=4, SWPF_1MBLLC=5, SWPF_0MBLLC=6, SWPF_JIT_ACTIVE=7,\
@@ -23,9 +23,9 @@ ENUMS = enum(PRT_COMM_SEND=1, PRT_COMM_RECV=2, PRT_COMM_SMP_FAIL=3, PRT_COMM_APP
 
 #4:["hwpf", "swpf", "l1hwpfswpf", "hwpfswpf", "nopref"],
 EXP_PLAN = {4:["hwpf", "swpf", "l1hwpfswpf"], \
-            3:["hwpf", "hwpfswpf", "l1hwpfswpf", "swpf"], \
-            2:["hwpf", "hwpfswpf", "l1hwpfswpf", "swpf"],\
-            1:["hwpf", "hwpfswpf", "l1hwpfswpf", "swpf"]}
+            3:["hwpf", "l1hwpfswpf", "swpf"], \
+            2:["hwpf", "hwpfswpf", "l1hwpfswpf"],\
+            1:["hwpf", "hwpfswpf", "l1hwpfswpf"]}
 
 PERF_BOOK = {"hwpf":1}
 
@@ -89,10 +89,6 @@ class Conf:
                         type="float", default="0.10",
                         dest="EXP_QUOTA_FRAC",
                         help="Exploration quota fraction. Fraction of total time that can be spent in exploration")
-        parser.add_option("-z", "--bypass-init-sec",
-                          type="float", default="9.0",
-                          dest="IGNORE_INIT_SEC",
-                          help="Ignore X+1 seconds in the start")
 
         (opts, args) = parser.parse_args()
         
@@ -133,7 +129,6 @@ class Conf:
         self.time_passed = 0.0
         self.reexp_active = False
         self.PHASE_CHANGE_FRAC = opts.PHASE_CHANGE_FRAC
-        self.IGNORE_INIT_SEC = opts.IGNORE_INIT_SEC
 
         self.rp = os.open("/tmp/PRT_POL_MAN_RECV", os.O_RDONLY)
         fl = fcntl.fcntl(self.rp, fcntl.F_GETFL)
@@ -311,10 +306,6 @@ def monitor_perf(policy, mon_time, conf):
         
             (comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert) = struct.unpack(conf.STRUCT_FMTSTR, data)
             
-            if comm_type == ENUMS.PRT_COMM_APP_EXIT:
-                print >> sys.stderr, "POLMAN -- application at core %d exiting. Stopping exploration"%(fd_idx)
-                exit
-            
             if fd_idx == 0:
                 bpc[0] += bpc0
                 offchip_bw += sys_bw
@@ -389,10 +380,6 @@ def wait_for_JIT(conf, revert):
                 continue
             (comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert_status) = struct.unpack(conf.STRUCT_FMTSTR, data)
             
-            if comm_type == ENUMS.PRT_COMM_APP_EXIT:
-                print >> sys.stderr, "POLMAN -- application at core %d exiting. Stopping exploration @ %f sec"%(fd_idx, conf.time_passed)
-                exit
-            
             if not revert and swpf_status == ENUMS.SWPF_JIT_ACTIVE:
                 break
             elif revert and swpf_status == 0:
@@ -411,10 +398,6 @@ def wait_for_hwpf_throttle(hwpf_change_to, conf):
             time.sleep(conf.SLEEP_TIME)
             continue
         (comm_type, core0, core1, core2, core3, bpc0, bpc1, bpc2, bpc3, sys_bw, hwpf_status, swpf_status, revert_status) = struct.unpack(conf.STRUCT_FMTSTR, data)
-        
-        if comm_type == ENUMS.PRT_COMM_APP_EXIT:
-            print >> sys.stderr, "POLMAN -- application at core %d exiting. Stopping exploration"%(fd_idx)
-            exit
         
         if hwpf_status == hwpf_change_to:
             break
@@ -476,8 +459,6 @@ def ready_this_policy(policy, conf):
     elif (conf.curr_policy != "hwpf" and conf.curr_policy != "nopref") and (policy == "hwpf" or policy == "nopref"):#and policy != conf.curr_policy:
         revert = True
 
-
-    print >> sys.stderr, conf.curr_policy, policy, conf.ENABLED_SWPF, revert
     if conf.ENABLED_SWPF:
         wait_for_JIT(conf, revert)
     elif revert:
@@ -538,7 +519,7 @@ def reexplore_winning(conf):
     
         policy_change_rate_list.sort(key=lambda tup: tup[1], reverse=True)
 
-        print >> sys.stderr, "POLMAN -- policy %s @ %.2f sec consec_beating %d policy_change_rate_list"%(conf.curr_policy, conf.time_passed, conf.consec_beating), policy_change_rate_list
+        #print >> sys.stderr, "POLMAN -- policy %s @ %.2f sec consec_beating %d policy_change_rate_list"%(conf.curr_policy, conf.time_passed, conf.consec_beating), policy_change_rate_list
         
         i += 1
 
@@ -619,7 +600,7 @@ def main():
     conf = Conf()
     conf.start_time = start_time
     #ignore the first 10 seconds
-    time.sleep(conf.IGNORE_INIT_SEC)
+    time.sleep(9)
 
     exp_plan_idx = 0
 
